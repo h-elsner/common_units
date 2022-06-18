@@ -95,6 +95,7 @@ function  PWMStatus: byte;                               {0: PWM not activated a
                                                           7: both 0 and 1 active}
 procedure SetPWMChannel(const PWMnr: byte; peri: uint32;
                         cycle: uint64; revers: boolean = true);
+procedure SetPWMPeriod(const PWMnr: byte; peri: uint64); {Set period in ns}
 procedure SetPWMCycle(const PWMnr: byte; cycle: uint64); {Set duty cycle in ns}
 procedure DeactivatePWM;                                 {Deactivate all PWM channels}
 
@@ -213,6 +214,18 @@ begin
            WriteSysFile(pathPWM+PWMchan1+frevers, keyrevers);
          WriteSysFile(pathPWM+PWMchan1+fenable, GPIOhigh);
        end;
+  end;
+end;
+
+procedure SetPWMPeriod(const PWMnr: byte; peri: uint64); {Set period in ns}
+var
+  speriod: SysData;
+
+begin
+  speriod:=IntToStr(peri);
+  case PWMnr of
+    0: WriteSysFile(pathPWM+PWMchan0+fperiod, speriod);
+    1: WriteSysFile(pathPWM+PWMchan1+fperiod, speriod);
   end;
 end;
 
