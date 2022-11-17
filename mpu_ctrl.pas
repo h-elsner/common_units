@@ -27,6 +27,26 @@
  Write a byte to MPU register:	i2cset y 1 0x68 107 0 (wake-up command)
  Read temperature cyclic (raw):	watch -n 0.5 'i2cget -y 1 0x68 65 w'
 
+ #############################################################################
+
+ https://www.raspberry-pi-geek.de/ausgaben/rpg/2016/04/teil-9-analog-digital-wandler-pcf8591/
+
+ Control byte PCF8591
+ 7 6 5 4 3 2 1 0
+ 0 | +-+ 0 |  + + --- Auswahl des A/D-Kanals. 00: Kanal 0, 01: Kanal 1, 10: Kanal 2, 11: Kanal 3
+   |   |   +--------- Auto-Inkrement-Funktion (1 = aktiv)
+   |   +------------- Programmieren der Analogkanäle (Details siehe Datenblatt, Fig. 4)
+   +----------------- Analog-Output aktivieren (1 = aktiv)
+
+
+ DAC output:
+ i2cset -y 1 0x48 0x40 w (w ist 0x00 bis 0xFF)
+
+ ADC 3  einlesen (Befehl muss zweimal eingeben werden,
+                 einmal zum Setzen des Registers und das zweite mal, um auszulesen.
+                 Das erste Ergebnis ist die vorherige Messung,
+                 das zweite Ergebnis ist der aktuelle Wert):
+ i2cget -y 1 0x48 0x43
 }
 
 unit mpu_ctrl;
@@ -44,6 +64,7 @@ const
   ISTID= '0x10';
   HMCadr='0x1E';
   AS5adr='0x36';
+  ADCadr='0x48';                                   {ADC PFC8591  0x48 .. 0x4F possible}
   intfac='I²C';
 
   bus='1';                                         {Used I2C bus, default}
@@ -68,10 +89,14 @@ const
   hexidc='0x';
   hexidp='$';
 
+  ADCVdd=3.3;
+
+function XtoByte(w: string): byte;
 function GetAdrStrMPU: boolean;                    {Check MPU address from register WHO_AM_I}
 function GetAdrStrIST: boolean;                    {Check IST8310 address from register WHO_AM_I}
 function GetAdrStrHMC: boolean;                    {Check HMC5883 address frm ID register A}
 function GetAdrStrAS5: boolean;                    {Check AS5600 address if burn is 0}
+function GetAdrStrADC(adr: string): boolean;       {Check PFC8591 addresses $48 - $4F}
 function GetReg(adr: string; r: byte): byte;       {Read byte from MPU}
 function GetRegWbe(adr: string; r: byte): int16;   {Read word from MPU}
 function GetRegWle(adr: string; r: byte): int16;   {Read word from IST little endian}
@@ -93,9 +118,20 @@ function afsToStr(afs: byte): string;              {Just for information about u
 function fsToStr(fs: byte): string;                {Just for information about used gyro scale}
 function AdrToChip(adr: string): string;           {Find chip type on I2C bus 1}
 function ScanI2C(intf: char='1'): string;          {Scan a I2C interface to find all connected chips}
-
+function ReadADC(adr: string; ch: byte): byte;     {Read ADC channel, value between 0 and 255}
+function SetDAC(adr: string; w: byte): boolean;    {Set output DAC to value between 0 and 255}
+function GetVolt(w: byte; factor: double=1.0): double;
 
 implementation
+
+function XtoByte(w: string): byte;
+var
+  s: string;
+
+begin
+  s:=ReplaceText(trim(w), hexidc, hexidp);
+  result:=StrToIntDef(s, 255);
+end;
 
 function GetAdrStrMPU: boolean;                    {Check MPU address from register WHO_AM_I}
 var
@@ -141,14 +177,24 @@ begin
   result:=trim(s)='0x00';
 end;
 
+function GetAdrStrADC(adr: string): boolean;       {Check PFC8591 addresses $48 - $4F}
+var
+  s: string;
+
+begin
+  s:='';
+  RunCommand(i2cset, [yes, bus, adr, '0x40 0'], s);  {Enables output DAC and set output to 0,
+                                                     should be set to run oscillator}
+  result:=(trim(s)='');
+end;
+
 function GetReg(adr: string; r: byte): byte;       {Read byte from MPU}
 var
   s: string;
 
 begin
   RunCommand(i2cget, [yes, bus, adr, IntToStr(r)], s);
-  s:=ReplaceText(trim(s), hexidc, hexidp);
-  result:=StrToIntDef(s, $FF);
+  result:=XtoByte(s);
 end;
 
 function GetRegWbe(adr: string; r: byte): int16;   {Read word from MPU}
@@ -303,6 +349,9 @@ begin
 end;
 
 function AdrToChip(adr: string): string;           {Find chip type on I2C bus 1}
+var
+  a, d: integer;
+
 begin
   result:='';
   if adr=MPUadr then begin
@@ -319,6 +368,11 @@ begin
   end;
   if adr=AS5adr then begin
     result:='AS5600';
+  end;
+  a:=XtoByte(adr);
+  d:=XtoByte(ADCadr);
+  if (a and d)=d then begin
+    result:='PCF8591';
   end;
 end;
 
@@ -339,7 +393,7 @@ var
 
 begin
   result:='';
-  RunCommand(i2cdct, [yes, bus], s);
+  RunCommand(i2cdct, [yes, intf], s);
   for i:=3 to 127 do begin
     adr:=hexidc+IntToHex(i, 2);                    {Test all possible addresses}
     RunCommand(i2cget, [yes, intf, adr, '0'], s);
@@ -347,6 +401,30 @@ begin
       result:=result+adr+' ';
   end;
   result:=trim(result);
+end;
+
+function ReadADC(adr: string; ch: byte): byte;      {Read ADC channel, value between 0 and 255}
+var
+  s: string;
+
+begin
+  RunCommand(i2cget, [yes, bus, adr, '0x4'+IntToStr(ch and 3)], s);
+  RunCommand(i2cget, [yes, bus, adr, '0x4'+IntToStr(ch and 3)], s);
+  result:=XtoByte(s);
+end;
+
+function SetDAC(adr: string; w: byte): boolean;    {Set output DAC to value between 0 and 255}
+var
+  s: string;
+
+begin
+  RunCommand(i2cset, [yes, bus, adr, '0x40', '0x'+IntToHex(w, 2)], s);
+  result:=trim(s)='';
+end;
+
+function GetVolt(w: byte; factor: double=1.0): double;
+begin
+  result:=factor*ADCVdd*w/255;
 end;
 
 end.
