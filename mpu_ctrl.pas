@@ -183,9 +183,8 @@ var
 
 begin
   s:='';
-  RunCommand(i2cset, [yes, bus, adr, '0x40 0'], s);  {Enables output DAC and set output to 0,
-                                                     should be set to run oscillator}
-  result:=(trim(s)='');
+  RunCommand(i2cget, [yes, bus, adr, '0x40'], s);  {try to read DAC}
+  result:=(pos(hexidc, s)=1);
 end;
 
 function GetReg(adr: string; r: byte): byte;       {Read byte from MPU}
@@ -408,8 +407,8 @@ var
   s: string;
 
 begin
-  RunCommand(i2cget, [yes, bus, adr, '0x4'+IntToStr(ch and 3)], s);
-  RunCommand(i2cget, [yes, bus, adr, '0x4'+IntToStr(ch and 3)], s);
+  RunCommand(i2cget, [yes, bus, adr, '0x4'+IntToStr(ch and 3)], s);  {Init channel}
+  RunCommand(i2cget, [yes, bus, adr, '0x4'+IntToStr(ch and 3)], s);  {Get value}
   result:=XtoByte(s);
 end;
 
