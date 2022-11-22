@@ -59,11 +59,11 @@ uses
    sysutils, strutils, process;
 
 const
-  MPUadr='0x68';                                   {Default address of I2C chips}
-  ISTadr='0x0E';
+  MPUadr='0x68';                                   {IMU MPU6050}
+  ISTadr='0x0E';                                   {Compass}
   ISTID= '0x10';
-  HMCadr='0x1E';
-  AS5adr='0x36';
+  HMCadr='0x1E';                                   {Compass Q500}
+  AS5adr='0x36';                                   {Contactless poti}
   ADCadr='0x48';                                   {ADC PFC8591  0x48 .. 0x4F possible}
   intfac='I²C';
 
@@ -347,31 +347,31 @@ begin
   end;
 end;
 
-function AdrToChip(adr: string): string;           {Find chip type on I2C bus 1}
+function AdrToChip(adr: string): string;           {Find chip type from address}
 var
   a, d: integer;
 
 begin
-  result:='';
+  result:='unknown';
   if adr=MPUadr then begin
-    result:='MPU6050';
+    result:='MPU6050';                             {Gyro, Acc}
     exit
   end;
   if adr=ISTadr then begin
-    result:='IST8310';
+    result:='IST8310';                             {Magnetometer}
     exit
   end;
-  if adr=HMCadr then begin
+  if adr=HMCadr then begin                         {Magnetometer}
     result:='HMC5883';
     exit;
   end;
   if adr=AS5adr then begin
-    result:='AS5600';
+    result:='AS5600';                              {Magnetic rotary position}
   end;
   a:=XtoByte(adr);
   d:=XtoByte(ADCadr);
   if (a and d)=d then begin
-    result:='PCF8591';
+    result:='PCF8591';                             {4-channel ADC, 1-channel DAC}
   end;
 end;
 
@@ -402,7 +402,7 @@ begin
   result:=trim(result);
 end;
 
-function ReadADC(adr: string; ch: byte): byte;      {Read ADC channel, value between 0 and 255}
+function ReadADC(adr: string; ch: byte): byte;     {Read ADC channel, value between 0 and 255}
 var
   s: string;
 
