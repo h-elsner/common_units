@@ -77,6 +77,7 @@ const
   timeout=300;
   UARTSpeed=115200;                                     {SR24 default speed}
   uartport='/dev/ttyAMA0';                              {Default port for Raspberry Pi}
+  USBport='/dev/ttyUSB0';                               {Default port for Serial to USB converter}
 
   header1=$55;                                          {Message start ID}
   header2=$55;
