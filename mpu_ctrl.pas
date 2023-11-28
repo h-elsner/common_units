@@ -63,8 +63,9 @@ const
   ISTadr='0x0E';                                   {Compass}
   ISTID= '0x10';
   HMCadr='0x1E';                                   {Compass Q500}
-  AS5adr='0x36';                                   {Contactless poti}
+  AS5adr='0x36';                                   {Contactless poti AS5600}
   ADCadr='0x48';                                   {ADC PFC8591  0x48 .. 0x4F possible}
+  BMPadr='0x77';							       {BMP280 Pressure sensor}
   intfac='I²C';
 
   bus='1';                                         {Used I2C bus, default}
