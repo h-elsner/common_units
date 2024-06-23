@@ -102,7 +102,7 @@ type
   TPayLoad = array[0..maxlen] of byte;                  {Message array}
 
 
-procedure ConnectUART(port: string; speed: uint32; var UARTconnected: boolean);
+function  ConnectUART(port: string; speed: uint32; var UARTconnected: boolean): string;
 procedure DisconnectUART(var UARTconnected: boolean);   {Disconnect SR24}
 function  UARTcanRead: boolean;                         {Check if ready to receive}
 function  UARTcanWrite: boolean;                        {Check if ready to transmit}
@@ -131,13 +131,18 @@ function  GetRSSI(data: TPayLoad): int16;               {Get receiver RSSI in %}
 
 implementation
 
-procedure ConnectUART(port: string; speed: uint32; var UARTconnected: boolean);
+function ConnectUART(port: string; speed: uint32; var UARTconnected: boolean): string;
 begin
   if not UARTconnected then begin                       {UART Tx, GPIO 14, pin 8}
     sr24ser:=TBlockSerial.Create;                       {UART Rx, GPIO 15, pin 10}
-    sr24ser.Connect(port);                              {Port for Raspi: /dev/ttyAMA0}
+    {$ifdef Linux}
+      sr24ser.LinuxLock:=false;
+    {$endif}
     sr24ser.Config(speed, 8, 'N', 1, false, false);     {Config default 115200 baud, 8N1}
-    UARTConnected:=true;
+    sr24ser.Connect(port);                              {Port for Raspi: /dev/ttyAMA0}
+    if SR24ser.LastError=0 then
+      UARTConnected:=true;
+    result:='Device: '+SR24ser.Device+' Status: '+SR24ser.LastErrorDesc;
   end;
 end;
 
@@ -156,6 +161,7 @@ end;
 function UARTcanRead: boolean;                          {Wrapper for simple UART routines}
 begin
   result:=sr24ser.CanRead(timeout);
+  result:=sr24ser.CanReadEx(timeout);
 end;
 
 function UARTcanWrite: boolean;
