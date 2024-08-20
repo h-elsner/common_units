@@ -45,6 +45,7 @@ function  GetNumSat(n: byte): byte;                    {Get number of sats from 
 function  GetFixType(n: byte): byte;                   {Get GPS fix type}
 function  FixTypeToStr(const w: byte): string;         {MAVlink like GPS fix type to string}
 function  GetGPSused(n: byte): boolean;                {Get GPS used flag}
+function  ModeLegacy(const f: integer): string;        {Q500, YTH and all other legacy Yuneec drones}
 
 
 implementation
@@ -186,6 +187,44 @@ end;
 function GetGPSused(n: byte): boolean;                 {GPS used in nsat}
 begin
   result:=(n and $80)<>0;
+end;
+
+function ModeLegacy(const f: integer): string;         {Q500, YTH and all other legacy Yuneec drones}
+begin
+  result:='Undefined';
+  case f of
+     0: result:='Stability';
+     1: result:='Stability - GPS off';
+     2: result:='Stability - GPSlost';
+     3: result:='Angle';
+     4: result:='Angle - GPS off';
+     5: result:='Angle - GPS lost';
+     6: result:='Smart';
+     7: result:='Smart - GPS lost';
+     8: result:='Motor starting';
+     9: result:='Temperature calibration';
+    10: result:='Pressure calibration';
+    11: result:='Accelerometer bias';
+    12: result:='Emergency';
+    13: result:='RTH Coming';
+    14: result:='RTH Landing';
+    15: result:='Binding';
+    16: result:='Initializing/Ready';                  {Ready to start}
+    17: result:='Waiting on RC';
+    18: result:='Magnetomer calibration';
+    19: result:='Unknown';
+    20: result:='Agility/Rate';                        {Rate}
+    21: result:='Smart - Follow me';
+    22: result:='Smart - Follow me - GPS lost';
+    23: result:='Smart - Camera tracking';
+    24: result:='Camera tracking - GPS lost';
+    26: result:='Task Curve Cable Cam';
+    27: result:='Task Journey';
+    28: result:='Task Point of Interest';
+    29: result:='Task Orbit';
+    32: result:='IPS';                                 {FMODE_ANGLE_MODE_IPS_ONLY:I = 0x20}
+    33: result:='Waypoints';
+  end;
 end;
 
 end.

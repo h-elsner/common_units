@@ -1,24 +1,4 @@
-{From ST24.h and ST24.c PX4 Autopilot
-
- Preparations:
- -------------
- Add to /boot/config.txt:
- [Switch-off bluetooth to get serial]
-  dtoverlay=pi3-disable-bt
-
- Switch-off UART console:
- sudo raspi-config > Interface Options > Serial port >
- "Would you like a login shell to be accessible over serial?" --> No
- "Would you like the serial port hardware to be enabled?" --> Yes
-
-
- Read data from SR24
- -------------------
-
- Uses non-standard package "Synapse" (install per Online package manager).
- Then open package file laz_synapse.lpk and Add to project.
-
- Data format UART messages (data packages)
+{Data format UART messages (data packages)
 
 byte idx val   desrcription
  0       $55   header 1
@@ -28,8 +8,8 @@ byte idx val   desrcription
 	                 CHANNELDATA24      = 1
                          Telemetry to RC    = 2                len $26  38
 	                 TRANSMITTERGPSDATA = 3                len $2B  43
-                         BIND               = 4
-                         Commands           = 20
+                         BIND               = 4                len 8
+                         Addition data      = 20               len minimal 7
  4       Counter         0 for old SR24 FW (Q500)
  5       ??    Random?   0 for old SR24 FW (Q500)
  6       RSSI  (in % ?)
@@ -60,8 +40,6 @@ Others may be from ACTION_TYPE in MissionData.java
    6 - One key take off
    7 - Setting JOUR
    8 - Real Sense depth
-
-
 }
 
 unit SR24_dec;
@@ -70,18 +48,13 @@ unit SR24_dec;
 
 interface
 
-uses
-  synaser;
+uses sysutils;
 
 const
-  timeout=300;
-  UARTSpeed=115200;                                     {SR24 default speed}
-  uartport='/dev/ttyAMA0';                              {Default port for Raspberry Pi}
-  USBport='/dev/ttyUSB0';                               {Default port for Serial to USB converter}
-
   header1=$55;                                          {Message start ID}
   header2=$55;
-  maxlen=$50;                                           {must be < header1 and header2 ?}
+  maxlen=67;                                            {according ST24.h define ST24_DATA_LEN_MAX 64}
+  ValidMsgTypes=[0..4, 20];
   BindMessage: array [0..10] of byte =
                (header1, header2, 8, 4, 0, 0, $42, $49, $4E, $44, $B0);
                {                len type       B    I    N    D   CRC}
@@ -94,25 +67,16 @@ const
 	        63, 96, 85,                             {33: motor status, IMU status, Preessure compass}
 	        16, 5, 0, 40);                          {36: flight mode, vehicle type, error flags, gps_AccH}
 
+  Telemetry_csvheader_common='Date/Time;Msg_Type;Counter;_?_;RSSI[%];PackageCtnr';
+  Telemetry_csvheader_channels=';CH0;CH1;CH2;CH3;CH4;CH5;CH6;CH7;CH8;CH9;CH10;CH11;lat;lon;alt;acc;speed;angle;NumSats';
 
-var
-  sr24ser: TBlockSerial;                                {UART access}
+  rsUndef='Undef';
+  rsUnknown='Unknown';
 
 type
   TPayLoad = array[0..maxlen] of byte;                  {Message array}
 
-
-function  ConnectUART(port: string; speed: uint32; var UARTconnected: boolean): string;
-procedure DisconnectUART(var UARTconnected: boolean);   {Disconnect SR24}
-function  UARTcanRead: boolean;                         {Check if ready to receive}
-function  UARTcanWrite: boolean;                        {Check if ready to transmit}
-function  UARTreadByte: byte;                           {receive one byte}
-procedure UARTwriteByte(b: byte);                       {send one byte}
-function  UARTreadMsg(var data: TPayLoad): boolean;     {Read one message}
-procedure UARTsendMsg(data: TPayload);                  {Send one telemetry dataset}
-procedure SendBind;                                     {Send one binding message}
-
-function  SR24_CRC8(data: TPayLoad; len: byte): byte;   {Create CRC8 checksum}
+  function  SR24_CRC8(data: TPayLoad; len: byte): byte;   {Create CRC8 checksum}
 function  TestCRC8(data: TPayLoad; len: byte): boolean; inline;  {Check if dataset is valid}
 
 function  GetFloatFromBuf(data: TPayLoad; idx: byte): single;              {Get 4 byte float as single}
@@ -128,112 +92,14 @@ function  CoordToInt(coord: single): int32;             {Convert coordinates to 
 function  AltitudeToInt(alt: single): int32;            {Convert Altitude, 4 byte}
 function  SpeedToInt(alt: single): int16;               {Speed 2 byte}
 function  GetRSSI(data: TPayLoad): int16;               {Get receiver RSSI in %}
+function  MessageTypeToStr(msg_type: byte):string;      {Known message types as string}
+function  RawData(data: TPayLoad; len: byte): string;
+function  ChannelValues(data: TPayLoad; numch: byte; separator: char=';'): string;
+function  ActionTypeToStr(at: byte): string;
+function  SwitchPos(sw: byte): string;
 
 implementation
 
-function ConnectUART(port: string; speed: uint32; var UARTconnected: boolean): string;
-begin
-  if not UARTconnected then begin                       {UART Tx, GPIO 14, pin 8}
-    sr24ser:=TBlockSerial.Create;                       {UART Rx, GPIO 15, pin 10}
-    {$ifdef Linux}
-      sr24ser.LinuxLock:=false;
-    {$endif}
-    sr24ser.Config(speed, 8, 'N', 1, false, false);     {Config default 115200 baud, 8N1}
-    sr24ser.Connect(port);                              {Port for Raspi: /dev/ttyAMA0}
-    if SR24ser.LastError=0 then
-      UARTConnected:=true;
-    result:='Device: '+SR24ser.Device+' Status: '+SR24ser.LastErrorDesc;
-  end;
-end;
-
-procedure DisconnectUART(var UARTconnected: boolean);   {Disconnect and free UART}
-begin
-  if UARTConnected then begin
-    try
-      sr24ser.CloseSocket;                              {Close UART connection}
-    finally
-      sr24ser.Free;
-    end;
-    UARTConnected:=false;
-  end;
-end;
-
-function UARTcanRead: boolean;                          {Wrapper for simple UART routines}
-begin
-  result:=sr24ser.CanRead(timeout);
-  result:=sr24ser.CanReadEx(timeout);
-end;
-
-function UARTcanWrite: boolean;
-begin
-  result:=sr24ser.CanWrite(timeout);
-end;
-
-function UARTreadByte: byte;
-begin
-  result:=sr24ser.RecvByte(timeout);
-end;
-
-procedure UARTwriteByte(b: byte);
-begin
-  sr24ser.SendByte(b);
-end;
-
-function UARTreadMsg(var data: TPayLoad): boolean;      {Detect and read one message from data stream}
-const
-  empty: array [0..2] of byte = (255, 255, 255);        {Buffer for header bytes to check if message starts here}
-
-var
-  i, z: byte;
-  buf: array[0..2] of byte;
-
-begin
-  result:=false;
-  z:=0;                                                 {Counter for unsynced bytes}
-  buf:=empty;                                           {Reset buffer}
-  repeat
-    buf[0]:=sr24ser.RecvByte(timeout);                  {read byte by byte}
-    if (buf[2]=header1) and                             {check if valid message (header+plausible length)}
-       (buf[1]=header2) and
-       (buf[0]<maxlen) then begin
-      data[0]:=buf[2];                                  {Copy header and length to message data}
-      data[1]:=buf[1];
-      data[2]:=buf[0];
-      for i:=3 to buf[0]+2 do                           {Read the other bytes of the dataset (payload + CRC)}
-        data[i]:=sr24ser.RecvByte(timeout);
-      z:=0;
-      result:=true;
-    end else begin                                      {Shift buffer right}
-      buf[2]:=buf[1];
-      buf[1]:=buf[0];
-      inc(z);                                           {Count bytes to prevent overflow}
-    end;
-  until result or                                       {Valid message but w/o CRC check}
-       (z>maxlen);                                      {Too long message}
-end;
-
-procedure UARTsendMsg(data: TPayload);                  {Send one telemetry dataset}
-var
-  crc, i: byte;
-
-begin
-  for i:=0 to data[2]+1 do
-    sr24ser.SendByte(data[i]);
-  crc:=SR24_CRC8(data, data[2]);
-  sr24ser.SendByte(crc);
-end;
-
-procedure SendBind;                                     {Send one BIND message}
-var
-  i: integer;
-
-begin
-  if sr24ser.CanWrite(timeout) then begin
-    for i:=0 to 10 do begin
-      sr24ser.SendByte(BindMessage[i]);
-    end;
-  end;
-end;
 
 function SR24_CRC8(data: TPayLoad; len: byte): byte;    {Compute CRC8 checksum}
 var
@@ -370,6 +236,78 @@ end;
 function GetRSSI(data: TPayLoad): int16;                {Get receiver RSSI in %}
 begin
   result:=round(data[6]*100/255);                       {in %}
+end;
+
+function MessageTypeToStr(msg_type: byte):string;       {Known message types as string}
+begin
+  result:=rsUnknown+' '+IntToStr(msg_type)+' ($'+HexStr(msg_type, 2)+')';
+  case msg_type of
+    0:  result:='ChannelData12';
+    1:  result:='ChannelData24';
+    2:  result:='Telemetry_2.4GHz';
+    3:  result:='C-GPS data';
+    4:  result:='Bind mode';
+    20: result:='Additional data';
+  end;
+end;
+
+function RawData(data: TPayLoad; len: byte): string;
+var
+  i: byte;
+begin
+  result:='';
+  for i:=0 to len do
+    result:=result+HexStr(data[i], 2)+' ';
+end;
+
+function ChannelValues(data: TPayLoad; numch: byte; separator: char=';'): string;
+var
+  i: byte;
+
+begin
+  result:='';
+  for i:=1 to numch do begin
+    result:=result+IntToStr(GetChValue(data, i))+separator;
+  end;
+end;
+
+{ from  MissionData.java
+ public static final int ACTION_TYPE_FEEDBACK = 2;
+ public static final int ACTION_TYPE_GOHOME_CONFIG = 11;
+ public static final int ACTION_TYPE_LED_CONFIG = 9;
+ public static final int ACTION_TYPE_ONEKEY_TAKEOFF = 6;
+ public static final int ACTION_TYPE_REALSENSE_DEPTH = 8;
+ public static final int ACTION_TYPE_REQUEST = 0;
+ public static final int ACTION_TYPE_RESPONSE = 1;
+ public static final int ACTION_TYPE_SETTING_CCC = 3;
+ public static final int ACTION_TYPE_SETTING_JOUR = 7;
+ public static final int ACTION_TYPE_SETTING_ROI = 4;
+ public static final int ACTION_TYPE_SONAR_CONFIG = 5; }
+
+function ActionTypeToStr(at: byte): string;
+begin
+  result:=rsUnknown+' '+IntToStr(at)+' (0x'+HexStr(at, 2)+')';
+  case at of
+    0:  result:='REQUEST';
+    1:  result:='RESPONSE';         {Up and down; Sonar?, Hearbeat? all zero}
+    2:  result:='FEEDBACK';         {Comes from FC: 0 0 0 }
+    3:  result:='SETTING_CCC';      {down Gimbaldaten?}
+    4:  result:='SETTING_ROI';
+    5:  result:='Sonar switch';     {Up 2Byte}
+    6:  result:='ONEKEY_TAKEOFF';
+    7:  result:='SETTING_JOUR';
+    8:  result:='REALSENSE_DEPTH';  {down, all zero}
+    9:  result:='LED switch';
+    10: result:='GPS switch';
+    11: result:='Home altitude set';
+  end;
+end;
+
+function SwitchPos(sw: byte): string;
+begin
+  result:='off';
+  if sw=1 then
+    result:='on';
 end;
 
 end.
