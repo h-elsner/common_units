@@ -72,19 +72,24 @@ const
 
   rsUndef='Undef';
   rsUnknown='Unknown';
+  rsGPSoff='-GPSoff';
+  rsGPSlost='-GPSlost';
+  fmAngle='Angle';
+  fmSmart='Smart';
 
 type
   TPayLoad = array[0..maxlen] of byte;                  {Message array}
 
-  function  SR24_CRC8(data: TPayLoad; len: byte): byte;   {Create CRC8 checksum}
+function  SR24_CRC8(data: TPayLoad; len: byte): byte;   {Create CRC8 checksum}
 function  TestCRC8(data: TPayLoad; len: byte): boolean; inline;  {Check if dataset is valid}
 
 function  GetFloatFromBuf(data: TPayLoad; idx: byte): single;              {Get 4 byte float as single}
 function  GetIntFromBuf(data: TPayLoad; idx, len: byte): integer;          {Get len bytes as integer big endian}
 procedure IntToTelemetry(var data: TPayload; w: integer; pos, len: byte);  {Convert integer to byte array}
-function  GetChValue(data: TPayLoad; chnr: byte): uint16;                  {Get value from on Channel, channel no starts with 1}
+function  GetChValue(data: TPayLoad; chnr: byte; pos: integer=8): uint16;  {Get value from on Channel, channel no starts with 1}
 function  CoordToFloat(coord: integer): single;                            {Convert integer cooerdinates to float}
-function  GetGPSdata(data: TPayLoad; var lat, lon, alt: single): boolean;  {Get lat, lon and alt from GPS data}
+function  GetGPSdata(data: TPayLoad; pos: integer;
+                     var lat, lon, alt: single): boolean;  {Get lat, lon and alt from GPS data}
 
 function  VoltToByte(v: single): byte;                  {Convert volt to byte}
 function  CurrentToByte(a: single): byte;               {Convert ampere to byte}
@@ -97,6 +102,8 @@ function  RawData(data: TPayLoad; len: byte): string;
 function  ChannelValues(data: TPayLoad; numch: byte; separator: char=';'): string;
 function  ActionTypeToStr(at: byte): string;
 function  SwitchPos(sw: byte): string;
+function  F_ModeToStr(const f: byte): string;        {Q500, YTH and all other legacy}
+procedure GetInt123(data: TPayload; pos: integer; var v1, v2, v3: int16);
 
 implementation
 
@@ -133,13 +140,15 @@ end;
 function GetFloatFromBuf(data: TPayLoad; idx: byte): single; {Position, Länge immer 4}
 var i: byte;
     wfl: packed array[0..3] of Byte;
-    wx: Single absolute wfl;
+    wx: Single absolute wfl;                            {May result NaN}
 
 begin
   result:=0;
   for i:=0 to 3 do
     wfl[i]:=data[idx+i];                                {Get 4 byte from array}
   result:=wx;                                           {Typecast by absolute}
+//  if IsNaan(result) then                                {Optional: Could except NaN}
+//    result:=0;
 end;
 
 {Integer represent byts to integer values, MSB is right (big endian)}
@@ -173,12 +182,12 @@ begin
     data[pos+len-1]:=data[pos+len-1] or $80;
 end;
 
-function GetChValue(data: TPayLoad; chnr: byte): uint16; {Channel no from 1..12 or 1..24}
+function GetChValue(data: TPayLoad; chnr: byte; pos: integer=8): uint16; {Channel no from 1..12 or 1..24}
 var
   n: byte;
 
 begin
-  n:=((chnr-1) div 2)*3+8;
+  n:=((chnr-1) div 2)*3+pos;
   if (chnr and 1)=0 then begin                           {even channel no Ch0...}
     result:=lo(data[n+1])*256+data[n+2];
   end else begin                                         {uneven channel no Ch1...}
@@ -193,17 +202,17 @@ end;
 
 {Get most important GPS data: Latitude, longitude, altitude (ASL)}
 
-function GetGPSdata(data: TPayLoad; var lat, lon, alt: single): boolean;
+function GetGPSdata(data: TPayLoad; pos: integer; var lat, lon, alt: single): boolean;
 var                                                     {Write into lat, lon and alt (ASL)}
-  la, lo: integer;
+  la, lo: int32;
 
 begin
   result:=false;
-  la:=GetIntFromBuf(data, 26, 4);
-  lo:=GetIntFromBuf(data, 30, 4);
+  la:=GetIntFromBuf(data, pos, 4);
+  lo:=GetIntFromBuf(data, pos+4, 4);
   lat:=CoordToFloat(la);
   lon:=CoordToFloat(lo);
-  alt:=GetFloatFromBuf(data, 34);
+  alt:=GetFloatFromBuf(data, pos+8);
   if (la<>0) or (lo<>0) then
     result:=true;
 end;
@@ -245,9 +254,9 @@ begin
     0:  result:='ChannelData12';
     1:  result:='ChannelData24';
     2:  result:='Telemetry_2.4GHz';
-    3:  result:='C-GPS data';
+    3:  result:='C-GPS_2.4GHz';
     4:  result:='Bind mode';
-    20: result:='Additional data';
+    20: result:='AdditionalData';
   end;
 end;
 
@@ -308,6 +317,51 @@ begin
   result:='off';
   if sw=1 then
     result:='on';
+end;
+
+function F_ModeToStr(const f: byte): string;        {Q500, YTH and all other legacy}
+begin
+  result:='';
+  case f of
+     0: result:='Stability';
+     1: result:='Blue flashing'+rsGPSoff;
+     2: result:='Blue'+rsGPSlost;
+     3: result:=fmAngle+' (Purple solid)';
+     4: result:=fmAngle+' (Purple flashing)'+rsGPSoff;
+     5: result:=fmAngle+' (Purple solid)'+rsGPSlost;
+     6: result:=fmSmart;
+     7: result:=fmSmart+rsGPSlost;
+     8: result:='Motor start';
+     9: result:='Temperature cali';
+    10: result:='Pressure cali';
+    11: result:='Accelerometer cali';
+    12: result:='Emergency';
+    13: result:='RTH coming';
+    14: result:='RTH landing';
+    15: result:='Bind';
+    16: result:='Init';                    {Ready to start}
+    17: result:='Wait on RC';
+    18: result:='Mag cali';
+    19: result:=rsUnknown;
+    20: result:='Rate';                         {Rate}
+    21: result:=fmSmart+' - Follow me';
+    22: result:=fmSmart+' - Follow me'+rsGPSlost;
+    23: result:=fmSmart+' - Camera tracking';
+    24: result:='Camera tracking'+rsGPSlost;
+    26: result:='Task Curve Cable Cam';
+    27: result:='Task Journey';
+    28: result:='Task Point of Interest';
+    29: result:='Task Orbit';
+    32: result:='IPS';                             {FMODE_ANGLE_MODE_IPS_ONLY:I = 0x20}
+    33: result:='Waypoints';
+  end;
+end;
+
+procedure GetInt123(data: TPayload; pos: integer; var v1, v2, v3: int16);
+begin
+  v1:=GetIntFromBuf(data, pos, 2);
+  v2:=GetIntFromBuf(data, pos+2, 2);
+  v3:=GetIntFromBuf(data, pos+4, 2);
 end;
 
 end.
