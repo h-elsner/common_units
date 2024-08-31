@@ -104,6 +104,7 @@ function  ActionTypeToStr(at: byte): string;
 function  SwitchPos(sw: byte): string;
 function  F_ModeToStr(const f: byte): string;        {Q500, YTH and all other legacy}
 procedure GetInt123(data: TPayload; pos: integer; var v1, v2, v3: int16);
+function  GetPackageCounter(data: TPayload): byte;
 
 implementation
 
@@ -362,6 +363,13 @@ begin
   v1:=GetIntFromBuf(data, pos, 2);
   v2:=GetIntFromBuf(data, pos+2, 2);
   v3:=GetIntFromBuf(data, pos+4, 2);
+end;
+
+function  GetPackageCounter(data: TPayload): byte;
+begin
+  result:=0;
+  if (data[3]=0) or (data[3]=3) or (data[3]=1) then   {Message ID for channel data}
+    result:=data[7];
 end;
 
 end.

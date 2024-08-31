@@ -57,8 +57,9 @@ begin
     {$ifdef Linux}
       sr24ser.LinuxLock:=false;
     {$endif}
-    sr24ser.Config(speed, 8, 'N', 1, false, false);     {Config default 115200 baud, 8N1}
     sr24ser.Connect(port);                              {Port for Raspi: /dev/ttyAMA0}
+//    sleep(50);
+    sr24ser.Config(speed, 8, 'N', SB1, false, false);   {Config default 115200 baud, 8N1}
     if SR24ser.LastError=0 then
       UARTConnected:=true;
     result:='Device: '+SR24ser.Device+' Status: '+SR24ser.LastErrorDesc;
