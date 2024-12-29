@@ -52,6 +52,7 @@ implementation
 
 function ConnectUART(port: string; speed: uint32; var UARTconnected: boolean): string;
 begin
+  result:='';
   if not UARTconnected then begin                       {UART Tx, GPIO 14, pin 8}
     sr24ser:=TBlockSerial.Create;                       {UART Rx, GPIO 15, pin 10}
     {$ifdef Linux}
