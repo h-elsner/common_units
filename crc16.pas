@@ -218,6 +218,11 @@ function update_crc_kermit( crc:word; c:byte ):word;
 function update_crc_dnp(crc:word; c:byte ):word;inline; 
 function update_crc_sick(crc:word; c,prev_byte:Byte ):word;inline;
 
+{ MAV link CRC}
+procedure CRC_accumulate(const b: byte; var crcAccum: uint16);
+function CRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1): uint16;
+function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1): boolean;
+
 implementation
   
 procedure init_crc16_tab; 
@@ -462,5 +467,32 @@ begin
   result := crc;
 end;
 
+{Translated from checksum.h of MavlinkLib-master}
+procedure CRC_accumulate(const b: byte; var crcAccum: uint16);
+var
+  tmp: byte;
+
+begin
+  tmp:=b xor (crcAccum and $00FF);
+  tmp:=tmp xor (tmp shl 4);
+  crcAccum:=(crcAccum shr 8) xor (tmp shl 8) xor (tmp shl 3) xor (tmp shr 4);
+end;
+
+function CRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1): uint16;
+var
+  i: integer;
+
+begin
+  result:=$FFFF;
+  for i:=startpos to LengthFixPart+msg.msglength-1 do begin
+    CRC_accumulate(msg.msgbytes[i], result);
+  end;
+  CRC_accumulate(0, result);
+end;
+
+function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1): boolean;
+begin
+  result:=(CRC16MAV(msg, LengthFixPart, startpos)=MavGetUInt16(msg, LengthFixPart+msg.msglength));
+end;
 
 end.

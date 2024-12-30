@@ -380,7 +380,7 @@ begin
   result:=FormatFloat(floatformat8, coord/10000000);     {[degE7]}
 end;
 
-function FormatAltitude(const alt: int32): shortstring;       {[mm]}
+function FormatAltitude(const alt: int32): shortstring;  {[mm]}
 begin
   result:=FormatFloat(floatformat2, alt/1000)+'m';
 end;
