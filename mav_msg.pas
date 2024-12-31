@@ -81,6 +81,15 @@ function GetCAM_SERIAL(msg: TMAVmessage): string;
 function GetGIMBAL_FW_VERSION(msg: TMAVmessage): string;
 function GetTEXT_MESSAGE(msg: TMAVmessage): string;
 
+// Send YGC messages
+procedure SetUInt16ToMsg(var msg: TMavMessage; const pos, value: uint16);
+procedure CreateStandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
+procedure SetCRC(var msg: TMAVmessage);
+procedure CreateFCHeartBeat(var msg: TMavMessage; SequenceNumber: byte);
+procedure CreateYGCcommandMessage(var msg: TMavMessage; const func: byte=$24);
+procedure CreateYGCcommandMessageLong(var msg: TMavMessage; const YGCtype: byte);
+
+
 implementation
 
 procedure SYS_STATUS(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
@@ -296,6 +305,120 @@ begin
     if msg.msgbytes[i]=$3A then
       result:=result+' ';
   end;
+end;
+
+procedure SetUInt16ToMsg(var msg: TMavMessage; const pos, value: uint16);
+var
+  v: uint16;
+
+begin
+  v:=value;
+  msg.msgbytes[pos]:=v and $00FF;   {value low}
+  v:=v shr 8;
+  msg.msgbytes[pos+1]:=v and $00FF; {value high}
+end;
+
+procedure CreateStandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
+begin
+  ClearMAVmessage(msg);
+  msg.msgbytes[0]:=MagicFE;
+  msg.msgbytes[1]:=MsgLength;
+  msg.msglength:=msg.msgbytes[1];
+  msg.msgbytes[3]:=1;                                  {SysId FC}
+end;
+
+procedure SetCRC(var msg: TMAVmessage);
+var
+  crc: uint16;
+
+begin
+  crc:=CRC16MAV(msg, LengthFixPartFE);
+  SetUInt16ToMsg(msg, msg.msglength+LengthFixPartFE, crc);
+  msg.valid:=true;
+end;
+
+procedure CreateFCHeartBeat(var msg: TMavMessage; SequenceNumber: byte);
+begin
+  CreateStandardPartMsg(msg, 5);
+  msg.msgbytes[2]:=SequenceNumber;
+  msg.msgbytes[12]:=1;
+  SetCRC(msg);
+end;
+
+{ YGC_Type from gimbal
+    1: 'GYRO_POWER'
+    2: 'EULER_ANGLE'
+    3: 'ACC'
+    5: 'TEMP_DIFF'
+    6: 'M_STATUS'
+    $12: 'Serial number'
+    $FE: 'Text info'
+
+ YGC_Command: short commands: len=2
+      0: Erase all & Button 1                           !!
+
+      1: len=21, default all Bytes 0
+      2: len=21, default all Bytes 0
+      3: len=21, default all Bytes 0
+      4: len=21, default Bytes 11..16 $64, all other 0
+      5: len=21, default Bytes 11..16 $64, all other 0
+
+      6: Read PID
+      7: Save PID
+      8: Reset PID
+      9: IMU temp cali
+    $0A: IMU temp erase                                 !!
+    $0C: Yaw encoder cali
+    $0D: Yaw encoder erase
+    $0F: Pre front cali
+    $10: Zero phase cali
+    $11: Zero phase erase
+    $12: Acc cali
+    $13: Acc erase
+    $14: Front cali
+    $15: Front erase
+    $16: Close motor
+    $17: Open motor
+    $18: Read software
+    $19: Restart GB
+    $1A: High frequency IMU
+    $1E: Motor test
+    $1F: Reson test
+    $20: Vibration test
+    $24: Reaction to heartbeat gimbal, no button assigned
+    $25: High frequency Gyro
+    $26: High frequency Acc
+    $27: Close high frequency
+
+}
+
+procedure CreateYGCcommandMessage(var msg: TMavMessage; const func: byte=$24);
+begin
+  CreateStandardPartMsg(msg, 2);
+  msg.msgbytes[2]:=1;
+  msg.msgbytes[3]:=YGCsysID;                            {SysId YGC}
+  msg.msgbytes[5]:=2;                                   {to Gimbal}
+  msg.msgbytes[7]:=2;                                   {MsgID}
+  msg.msgbytes[8]:=func;                                {YGC_Type}
+  msg.msgbytes[8]:=func;                                {YGC_Command}
+  SetCRC(msg);
+end;
+
+procedure CreateYGCcommandMessageLong(var msg: TMavMessage; const YGCtype: byte);
+var
+  i: integer;
+
+begin
+  CreateStandardPartMsg(msg, 33);                       {Good for 15 int16 values}
+  msg.msgbytes[2]:=1;
+  msg.msgbytes[3]:=YGCsysID;                            {SysId YGC}
+  msg.msgbytes[5]:=2;                                   {to Gimbal}
+  msg.msgbytes[7]:=2;                                   {MsgID}
+  msg.msgbytes[8]:=YGCtype;                             {YGC_Type}
+  if (YGCtype=4) or (YGCtype=5) then
+    for i:=11 to 16 do
+      msg.msgbytes[i]:=$64;                             {100 decimal, placeholder?}
+  SetCRC(msg);
 end;
 
 end.
