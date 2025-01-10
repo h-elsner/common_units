@@ -35,6 +35,9 @@ Boston, MA 02110-1335, USA.
 (* Helpful information:
 
 https://mavlink.io/en/guide/serialization.html
+https://github.com/mavlink/c_library_v1/tree/master/common
+https://github.com/mavlink/c_library_v1/tree/master/ardupilotmega
+
 https://github.com/mavlink/c_library_v2/tree/master/common
 
 MsgID	MsgID	*	MAVlink Message
@@ -42,6 +45,7 @@ MsgID	MsgID	*	MAVlink Message
 1	$001	*       SYS_STATUS
 2	$002	*	SYSTEM_TIME
 4	$004	*	PING
+22      $016
 24	$018	*	GPS_RAW_INT
 25	$019	*	GPS_STATUS
 29      $01D    *       SCALED_PRESSURE
@@ -50,6 +54,7 @@ MsgID	MsgID	*	MAVlink Message
 32	$020	*	LOCAL_POSITION_NED
 33	$021	*	GLOBAL_POSITION_INT
 36	$024		SERVO_OUTPUT_RAW
+56      $038            Serial_number
 65	$041		RC_CHANNELS
 69	$045		MANUAL_CONTROL
 70	$046		RC_CHANNELS_OVERRIDE
@@ -82,6 +87,14 @@ MsgID	MsgID	*	MAVlink Message
 324	$144		PARAM_EXT_ACK
 340	$154		UTM_GLOBAL_POSITION
 
+
+This Unit offers procedures and functions for different Yuneec-specific MAVlink
+communication used in Typhoon H hardware.
+
+MagicBC=$BC:   Flight controller <-> GUI, Sensor files, nested in CGO3+ messages
+MagicFD=$FD:   PX4 based Yuneec drones  (MAVlink V2)
+MagicFE=$FE:   Flight controller <-> Gimbal <-> camera CGO3+
+
 *)
 
 unit mav_msg;                                       {Decode MAVlink messages}
@@ -95,205 +108,288 @@ uses
 
 {Public functions and procedures}
 // MAV link
-procedure SYS_STATUS(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
-procedure SYS_TIME(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
-function  PING(const msg: TMAVmessage; offset: byte; var data: TGPSdata): byte;
-procedure GPS_RAW_INT(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
-procedure GPS_STATUS(const msg: TMAVmessage; offset: byte; var data: TGPSdata);  {Possibly never used by Yuneec or empty}
-procedure SCALED_PRESSURE(const msg: TMAVmessage; offset: byte; var data: THWstatusData);
-procedure ATTITUDE(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
-procedure LOCAL_POSITION_NED(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
-procedure GLOBAL_POSITION_INT(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
-procedure VRF_HUD(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
-procedure MOUNT_ORIENTATION(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
+procedure SYS_STATUS(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+procedure SYS_TIME(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+function  PING(const msg: TMAVmessage; pos: byte; var data: TGPSdata): byte;
+function  PARAM_VALUE(const msg: TMAVmessage; pos: byte; var value: single): string;
+procedure GPS_RAW_INT(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+procedure GPS_STATUS(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+procedure RAW_IMU(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+procedure SCALED_PRESSURE(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+procedure ATTITUDE(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure LOCAL_POSITION_NED(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure GLOBAL_POSITION_INT(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+procedure VRF_HUD(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure SENSOR_OFFSETS(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+procedure RANGEFINDER(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+procedure EKF_STATUS_REPORT(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 
-function STATUSTEXT(const msg: TMAVmessage; offset: byte; SeveritySeparator: char='|'): string;
+function COMMAND_ACK(const msg: TMAVmessage; pos: byte; var CommandNumber: uint16): byte;
+function STATUSTEXT(const msg: TMAVmessage; pos: byte; SeveritySeparator: char='|'): string;
 function YuneecTimeStampInSeconds(const msg: TMAVmessage): uint64;
+function GetSERIAL(const msg: TMAVmessage; pos: byte): string;
+function GetSYSTEM(const msg: TMAVmessage; pos: byte; var FW, FWdate: string): string;
 
 // Gimbal UART messages
-function GetCAM_SERIAL(msg: TMAVmessage): string;
 function GetGIMBAL_FW_VERSION(msg: TMAVmessage): string;
 function GetTEXT_MESSAGE(msg: TMAVmessage): string;
 
 // Send YGC messages
 procedure SetUInt16ToMsg(var msg: TMavMessage; const pos, value: uint16);
 procedure CreateStandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
-procedure SetCRC(var msg: TMAVmessage);
+procedure CreateStandardGUIMsg(var msg: TMAVmessage; const MsgLength: byte);
+procedure SetCRC_FE(var msg: TMAVmessage);
+procedure SetCRC_BC(var msg: TMAVmessage);
 procedure CreateFCHeartBeat(var msg: TMavMessage; SequenceNumber: byte);
 procedure CreateYGCcommandMessage(var msg: TMavMessage; const func: byte=$24);
 procedure CreateYGCcommandMessageLong(var msg: TMavMessage; const YGCtype: byte);
 
+// Send GUI messages
+procedure CreateGUIheartbeat(var msg: TMAVmessage);
+procedure CreateGUIEmptyMsg(var msg: TMAVmessage; const MsgId, MsgLen: byte);
+procedure CreateGUI_SYS_STATUS(var msg: TMAVmessage);    {From GUI with default values}
+procedure CreateGUI_PARAM_REQUEST_LIST(var msg: TMAVmessage);
+procedure CreateGUI_MISSION_REQUEST_INT(var msg: TMAVmessage; const target: byte);
+procedure CreateGUI_PARAM_SET(var msg: TMAVmessage;
+                              const parameter: shortstring; value: single);
 
 implementation
 
-procedure SYS_STATUS(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
+procedure SYS_STATUS(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
 var
   SensorFlags: THWFlags;
 
 begin
   with SensorFlags do begin
-    sensor_present:=MavGetUInt32(msg, offset);
-    sensor_enabled:=MavGetUInt32(msg, offset+4);
-    sensor_healthy:=MavGetUInt32(msg, offset+8);
-
+    sensor_present:=MavGetUInt32(msg, pos);
+    sensor_enabled:=MavGetUInt32(msg, pos+4);
+    sensor_healthy:=MavGetUInt32(msg, pos+8);
     if sensor_present>0 then begin
-      data.gps_present:=((sensor_present and $04)>0) and           {mag}
-                        ((sensor_present and $20)>0);              {gps}
+      data.gps_present:=(sensor_present and H480_HWflags)=H480_HWflags;
       data.sensors_OK:=(sensor_present=sensor_enabled) and
                        (sensor_present=sensor_healthy);
     end;
   end;
 
-  data.load:=MavGetUInt16(msg, offset+12);
-  data.voltage:=MavGetUInt16(msg, offset+14);
-
+  data.load:=MavGetUInt16(msg, pos+12);
+  data.voltage:=MavGetUInt16(msg, pos+14);
 
 end;
 
-procedure SYS_TIME(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
+procedure SYS_TIME(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
 begin
-  data.timeUTC:=UnixToDateTime(MavGetUInt64(msg, offset) div 1000000);  {us --> s}
+  data.timeUTC:=UnixToDateTime(MavGetUInt64(msg, pos) div 1000000);  {us --> s}
   if msg.msglength=10 then
-    data.boottime:=MilliSecondsToDateTime(MavGetUInt32(msg, offset+8) and $FFFF)
+    data.boottime:=MilliSecondsToDateTime(MavGetUInt32(msg, pos+8) and $FFFF)
   else
     if msg.msglength=11 then
-      data.boottime:=MilliSecondsToDateTime(MavGetUInt32(msg, offset+8) and $FFFFFF)
+      data.boottime:=MilliSecondsToDateTime(MavGetUInt32(msg, pos+8) and $FFFFFF)
     else
-      data.boottime:=MilliSecondsToDateTime(MavGetUInt32(msg, offset+8));
+      data.boottime:=MilliSecondsToDateTime(MavGetUInt32(msg, pos+8));
 end;
 
-function PING(const msg: TMAVmessage; offset: byte; var data: TGPSdata): byte;
+function PING(const msg: TMAVmessage; pos: byte; var data: TGPSdata): byte;
 begin
-  data.boottime:=MavGetUInt64(msg, offset)/MilliSecondsPerDay/1000;
-  result:=msg.msgbytes[offset+8];                        {Ping_sequence_number}
+  data.boottime:=MavGetUInt64(msg, pos)/MilliSecondsPerDay/1000;
+  result:=msg.msgbytes[pos+8];                        {Ping_sequence_number}
 end;
 
-procedure GPS_RAW_INT(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
+function PARAM_VALUE(const msg: TMAVmessage; pos: byte; var value: single): string;
+var      {22}
+  i: byte;
+
 begin
-  data.boottime:=MavGetUInt64(msg, offset)/MilliSecondsPerDay/1000;
-  data.lat:=MavGetInt32(msg, offset+8);
-  data.lon:=MavGetInt32(msg, offset+12);
-  data.altMSL:=MavGetInt32(msg, offset+16);
-  data.eph:=MavGetUInt16(msg, offset+20);
-  data.epv:=MavGetUInt16(msg, offset+22);
-  data.vel:=MavGetUInt16(msg, offset+24);
-  data.cog:=MavGetUInt16(msg, offset+26);
-  data.fix_type:=msg.msgbytes[offset+28];
-  data.sats_visible:=msg.msgbytes[offset+29];
+  result:='';
+  for i:=pos+8 to pos+21 do
+    if msg.msgbytes[i] in [32..127] then
+      result:=result+chr(msg.msgbytes[i]);
+  value:=MavGetFloat(msg, pos);
+end;
+
+procedure GPS_RAW_INT(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+begin     {24}
+  data.boottime:=MavGetUInt64(msg, pos)/MilliSecondsPerDay/1000;
+  data.lat:=MavGetInt32(msg, pos+8);
+  data.lon:=MavGetInt32(msg, pos+12);
+  data.altMSL:=MavGetInt32(msg, pos+16);
+  data.eph:=MavGetUInt16(msg, pos+20);
+  data.epv:=MavGetUInt16(msg, pos+22);
+  data.vel:=MavGetUInt16(msg, pos+24);
+  data.cog:=MavGetUInt16(msg, pos+26);
+  data.fix_type:=msg.msgbytes[pos+28];
+  data.sats_inuse:=msg.msgbytes[pos+29] and $3F;
 
   if msg.msglength>30 then begin
-    data.alt_ellipsoid:=MavGetInt32(msg, offset+30);
-    data.h_acc:=MavGetUInt32(msg, offset+34);
-    data.v_acc:=MavGetUInt32(msg, offset+38);
-    data.vel_acc:=MavGetUInt32(msg, offset+42);
+    data.alt_ellipsoid:=MavGetInt32(msg, pos+30);
+    data.h_acc:=MavGetUInt32(msg, pos+34);
+    data.v_acc:=MavGetUInt32(msg, pos+38);
+    data.vel_acc:=MavGetUInt32(msg, pos+42);
 
     if msg.msglength=49 then begin                       {Yuneec specific}
-      data.hdg_acc:=MavGetUInt16(msg, offset+46);
-      data.yaw:=msg.msgbytes[offset+48];
+      data.hdg_acc:=MavGetUInt16(msg, pos+46);
+      data.yaw:=msg.msgbytes[pos+48];
     end else begin                                       {msg length = 52}
-      data.hdg_acc:=MavGetUInt32(msg, offset+46);
-      data.yaw:=MavGetUInt16(msg, offset+50);
+      data.hdg_acc:=MavGetUInt32(msg, pos+46);
+      data.yaw:=MavGetUInt16(msg, pos+50);
     end;
   end;
 end;
 
-procedure GPS_STATUS(const msg: TMAVmessage; offset: byte; var data: TGPSdata); {Possibly never used by Yuneec or empty}
-var
+procedure GPS_STATUS(const msg: TMAVmessage; pos: byte; var data: TGPSdata); {Possibly never used by Yuneec or empty}
+var       {25}
   i: integer;
 
 begin
-  data.sats_visible:=msg.msgbytes[offset];
+  data.sats_visible:=msg.msgbytes[pos] and $3F;
+  data.sats_inuse:=0;
   for i:=0 to MAVsatCount do begin
-    data.sat_prn[i]:=msg.msgbytes[i+offset+1];
-    data.sat_used[i]:=msg.msgbytes[i+offset+21];
-    data.sat_elevation[i]:=msg.msgbytes[i+offset+41];
-    data.sat_azimuth[i]:=msg.msgbytes[i+offset+61];
-    data.sat_snr[i]:=msg.msgbytes[i+offset+81];
+    data.sat_prn[i]:=msg.msgbytes[i+pos+1];
+    data.sat_used[i]:=msg.msgbytes[i+pos+21];
+    if data.sat_used[i]>0 then
+      data.sats_inuse:=data.sats_inuse+1;
+    data.sat_elevation[i]:=msg.msgbytes[i+pos+41];
+    data.sat_azimuth[i]:=msg.msgbytes[i+pos+61];
+    data.sat_snr[i]:=msg.msgbytes[i+pos+81];
   end;
 end;
 
-procedure SCALED_PRESSURE(const msg: TMAVmessage; offset: byte; var data: THWstatusData);
-begin
-  data.boottime:=MavGetUInt32(msg, offset)/MilliSecondsPerDay;
-  data.pressure_abs:=MavGetFloat(msg, offset+4);
-  data.pressure_diff:=MavGetFloat(msg, offset+8);
-  data.baro_temp:=MavGetUInt16(msg, offset+12);
+procedure RAW_IMU(const msg: TMAVmessage; pos: byte; var data: THWstatusData); {Possibly never used by Yuneec or empty}
+begin     {27}
+  data.boottime:=MavGetUInt64(msg, pos)/MilliSecondsPerDay/1000;
+  data.AccX:=MavGetInt16(msg, pos+8);
+  data.AccY:=MavGetInt16(msg, pos+10);
+  data.AccZ:=MavGetInt16(msg, pos+12);
+  data.GyroX:=MavGetInt16(msg, pos+14);
+  data.GyroY:=MavGetInt16(msg, pos+16);
+  data.GyroZ:=MavGetInt16(msg, pos+18);
+  data.MagX:=MavGetInt16(msg, pos+20);
+  data.MagY:=MavGetInt16(msg, pos+22);
+  data.MagZ:=MavGetInt16(msg, pos+24);
 end;
 
-procedure ATTITUDE(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
-begin
-  data.boottime:=MavGetUInt32(msg, offset)/MilliSecondsPerDay;
-
-  data.roll:=RadToDegree180(MavGetFloat(msg, offset+4));
-  data.pitch:=RadToDegree180(MavGetFloat(msg, offset+8));
-  data.yaw:=RadToDegree360(MavGetFloat(msg, offset+12));
-
-  data.rollspeed:=MavGetFloat(msg, offset+16);
-  data.pitchspeed:=MavGetFloat(msg, offset+20);
-  data.yawspeed:=MavGetFloat(msg, offset+24);
+procedure SCALED_PRESSURE(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+begin     {29}
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
+  data.pressure_abs:=MavGetFloat(msg, pos+4);
+  data.pressure_diff:=MavGetFloat(msg, pos+8);
+  data.baro_temp:=MavGetUInt16(msg, pos+12);
 end;
 
-procedure LOCAL_POSITION_NED(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
-begin
-  data.boottime:=MavGetUInt32(msg, offset)/MilliSecondsPerDay;
+procedure ATTITUDE(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+begin     {30}
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
 
-  data.posx:=MavGetFloat(msg, offset+4);
-  data.posy:=MavGetFloat(msg, offset+8);
-  data.posz:=MavGetFloat(msg, offset+12);
+  data.roll:=RadToDegree180(MavGetFloat(msg, pos+4));
+  data.pitch:=RadToDegree180(MavGetFloat(msg, pos+8));
+  data.yaw:=RadToDegree360(MavGetFloat(msg, pos+12));
 
-  data.vx:=MavGetFloat(msg, offset+16);
-  data.vy:=MavGetFloat(msg, offset+20);
-  data.vz:=MavGetFloat(msg, offset+24);
+  data.rollspeed:=MavGetFloat(msg, pos+16);
+  data.pitchspeed:=MavGetFloat(msg, pos+20);
+  data.yawspeed:=MavGetFloat(msg, pos+24);
 end;
 
-procedure GLOBAL_POSITION_INT(const msg: TMAVmessage; offset: byte; var data: TGPSdata);
-begin
-  data.boottime:=MavGetUInt32(msg, offset)/MilliSecondsPerDay;
+procedure LOCAL_POSITION_NED(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+begin     {32}
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
 
-  data.lat:=MavGetInt32(msg, offset+4);
-  data.lon:=MavGetInt32(msg, offset+8);
-  data.altMSL:=MavGetInt32(msg, offset+12);
-  data.alt_rel:=MavGetInt32(msg, offset+16);
+  data.posx:=MavGetFloat(msg, pos+4);
+  data.posy:=MavGetFloat(msg, pos+8);
+  data.posz:=MavGetFloat(msg, pos+12);
 
-  data.vx:=MavGetInt16(msg, offset+20);
-  data.vy:=MavGetInt16(msg, offset+22);
-  data.vz:=MavGetInt16(msg, offset+24);
-  data.hdg:=MavGetUInt16(msg, offset+26);
+  data.vx:=MavGetFloat(msg, pos+16);
+  data.vy:=MavGetFloat(msg, pos+20);
+  data.vz:=MavGetFloat(msg, pos+24);
 end;
 
-procedure VRF_HUD(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
-begin
-  data.airspeed:=MavGetFloat(msg, offset);
-  data.groundspeed:=MavGetFloat(msg, offset+4);
-  data.altmsl:=MavGetFloat(msg, offset+8);               {For Yuneec: altitude relative}
-  data.climbrate:=MavGetFloat(msg, offset+12);
+procedure GLOBAL_POSITION_INT(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+begin     {33}
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
+
+  data.lat:=MavGetInt32(msg, pos+4);
+  data.lon:=MavGetInt32(msg, pos+8);
+//  data.altMSL:=MavGetInt32(msg, pos+12);        {Wrong in FC data to GUI}
+  data.alt_rel:=MavGetInt32(msg, pos+16);
+
+  data.vx:=MavGetInt16(msg, pos+20);
+  data.vy:=MavGetInt16(msg, pos+22);
+  data.vz:=MavGetInt16(msg, pos+24);
+  data.hdg:=MavGetUInt16(msg, pos+26);
+end;
+
+procedure VRF_HUD(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+begin     {74}
+  data.airspeed:=MavGetFloat(msg, pos);
+  data.groundspeed:=MavGetFloat(msg, pos+4);
+  data.altmsl:=MavGetFloat(msg, pos+8);               {For Yuneec: altitude relative}
+  data.climbrate:=MavGetFloat(msg, pos+12);
 
   if msg.msglength=20 then begin
-    data.heading:=MavGetInt16(msg, offset+16);
-    data.throttle:=MavGetUInt16(msg, offset+18);         {Throttle [%]}
+    data.heading:=MavGetInt16(msg, pos+16);
+    data.throttle:=MavGetUInt16(msg, pos+18);         {Throttle [%]}
   end else
-    data.heading:=msg.msgbytes[offset+16];               {Yuneec specific}
+    data.heading:=msg.msgbytes[pos+16];               {Yuneec specific}
 end;
 
-procedure MOUNT_ORIENTATION(const msg: TMAVmessage; offset: byte; var data: TAttitudeData);
+procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 begin
-  data.boottime:=MavGetUInt32(msg, offset)/MilliSecondsPerDay;
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
 
-  data.roll:=MavGetFloat(msg, offset+4);
-  data.pitch:=MavGetFloat(msg, offset+8);
-  data.yaw:=MavGetFloat(msg, offset+12);
-  data.yaw_abs:=MavGetFloat(msg, offset+16);
+  data.roll:=MavGetFloat(msg, pos+4);
+  data.pitch:=MavGetFloat(msg, pos+8);
+  data.yaw:=MavGetFloat(msg, pos+12);
+  data.yaw_abs:=MavGetFloat(msg, pos+16);
 end;
 
+procedure SENSOR_OFFSETS(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+begin     {150}
+  data.MagDecl:=MavGetFloat(msg, pos);
+  data.MagOfsX:=MavGetInt16(msg, pos+36);
+  data.MagOfsY:=MavGetInt16(msg, pos+38);
+  data.MagOfsZ:=MavGetInt16(msg, pos+40);
 
-function STATUSTEXT(const msg: TMAVmessage; offset: byte; SeveritySeparator: char='|'): string;
-var
+  data.pressure_raw:=MavGetInt32(msg, pos+4);
+  data.baro_rawtemp:=MavGetInt32(msg, pos+8);
+
+  data.GyroCaliX:=MavGetFloat(msg, pos+12);
+  data.GyroCaliY:=MavGetFloat(msg, pos+16);
+  data.GyroCaliZ:=MavGetFloat(msg, pos+20);
+
+  data.AccCaliX:=MavGetFloat(msg, pos+24);
+  data.AccCaliY:=MavGetFloat(msg, pos+28);
+  data.AccCaliZ:=MavGetFloat(msg, pos+32);
+end;
+
+procedure RANGEFINDER(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+begin     {173}
+  data.RangeFinderDist:=MavGetFloat(msg, pos);
+  data.RangeFinderRawVoltage:=MavGetFloat(msg, pos+4);
+end;
+
+procedure EKF_STATUS_REPORT(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+begin     {193}
+  data.velocity_variance:=MavGetFloat(msg, pos);
+  data.pos_horiz_variance:=MavGetFloat(msg, pos+4);
+  data.pos_vert_variance:=MavGetFloat(msg, pos+8);
+  data.compass_variance:=MavGetFloat(msg, pos+12);
+  data.terrain_alt_variance:=MavGetFloat(msg, pos+16);
+  data.EKFstatus:=MavGetUInt16(msg, pos+20);
+end;
+
+function COMMAND_ACK(const msg: TMAVmessage; pos: byte; var CommandNumber: uint16): byte;
+begin    {77}
+  CommandNumber:=MavGetUint16(msg, pos);
+  result:=msg.msgbytes[pos+2];
+end;
+
+function STATUSTEXT(const msg: TMAVmessage; pos: byte; SeveritySeparator: char='|'): string;
+var      {253}
   i: integer;
 begin
-  result:=SeverityToStr(msg.msgbytes[offset])+SeveritySeparator;
+  result:=SeverityToStr(msg.msgbytes[pos])+SeveritySeparator;
   for i:=1 to msg.msglength-1 do begin
-    if msg.msgbytes[offset+i] in [10, 13, 32..127] then
-      result:=result+chr(msg.msgbytes[offset+i]);
+    if msg.msgbytes[pos+i] in [10, 13, 32..127] then
+      result:=result+chr(msg.msgbytes[pos+i]);
   end;
 end;
 
@@ -305,17 +401,31 @@ begin                                                    {+2 Time starts after! 
     result:=MavGetUInt64Reverse(msg, msg.msglength+LengthFixPartFD+2) div 1000000;
 end;
 
-function GetCAM_SERIAL(msg: TMAVmessage): string;
+function GetSERIAL(const msg: TMAVmessage; pos: byte): string;
 var
   i: uint32;
 
 begin
-  i:=MavGetUInt32(msg, 9);
+  i:=MavGetUInt32(msg, pos);
   result:=IntToHex(i, 8)+'-';
-  i:=MavGetUInt32(msg, 13);
+  i:=MavGetUInt32(msg, pos+4);
   result:=result+IntToHex(i, 8)+'-';
-  i:=MavGetUInt32(msg, 17);
+  i:=MavGetUInt32(msg, pos+4);
   result:=result+IntToHex(i, 8);
+end;
+
+function GetSYSTEM(const msg: TMAVmessage; pos: byte; var FW, FWdate: string): string;
+var
+  i: byte;
+
+begin
+  result:='';
+  FW:=FormatFloat('0.00', msg.msgbytes[pos]/100);
+  FWdate:=IntToStr(MavGetUInt16(msg, pos+4))+'-'+
+          IntToStr(MavGetUInt16(msg, pos+2));
+  for i:=pos+6 to pos+21 do
+    if msg.msgbytes[i] in [32..127] then
+      result:=result+chr(msg.msgbytes[i]);
 end;
 
 function GetGIMBAL_FW_VERSION(msg: TMAVmessage): string;
@@ -347,9 +457,9 @@ var
 
 begin
   v:=value;
-  msg.msgbytes[pos]:=v and $00FF;   {value low}
+  msg.msgbytes[pos]:=v and $00FF;                        {value low}
   v:=v shr 8;
-  msg.msgbytes[pos+1]:=v and $00FF; {value high}
+  msg.msgbytes[pos+1]:=v and $00FF;                      {value high}
 end;
 
 procedure CreateStandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
@@ -357,11 +467,23 @@ begin
   ClearMAVmessage(msg);
   msg.msgbytes[0]:=MagicFE;
   msg.msgbytes[1]:=MsgLength;
-  msg.msglength:=msg.msgbytes[1];
-  msg.msgbytes[3]:=1;                                  {SysId FC}
+  msg.msglength:=MsgLength;
+  msg.msgbytes[3]:=1;                                    {SysId FC}
 end;
 
-procedure SetCRC(var msg: TMAVmessage);
+procedure CreateStandardGUIMsg(var msg: TMAVmessage; const MsgLength: byte);
+begin
+  ClearMAVmessage(msg);
+  msg.msgbytes[0]:=MagicBC;
+  msg.msgbytes[1]:=MsgLength;
+  msg.msglength:=MsgLength;
+  msg.msgbytes[2]:=1;                                    {SequNo}
+  msg.msgbytes[3]:=200;                                  {SysId GUI}
+  msg.msgbytes[4]:=1;                                    {TargetID flight controller}
+end;
+
+
+procedure SetCRC_FE(var msg: TMAVmessage);
 var
   crc: uint16;
 
@@ -371,12 +493,22 @@ begin
   msg.valid:=true;
 end;
 
+procedure SetCRC_BC(var msg: TMAVmessage);
+var
+  crc: uint16;
+
+begin
+  crc:=CRC16X25(msg, LengthFixPartBC);
+  SetUInt16ToMsg(msg, msg.msglength+LengthFixPartBC, crc);
+  msg.valid:=true;
+end;
+
 procedure CreateFCHeartBeat(var msg: TMavMessage; SequenceNumber: byte);
 begin
   CreateStandardPartMsg(msg, 5);
   msg.msgbytes[2]:=SequenceNumber;
   msg.msgbytes[12]:=1;
-  SetCRC(msg);
+  SetCRC_FE(msg);
 end;
 
 { YGC_Type from gimbal
@@ -423,7 +555,6 @@ end;
     $25: High frequency Gyro
     $26: High frequency Acc
     $27: Close high frequency
-
 }
 
 procedure CreateYGCcommandMessage(var msg: TMavMessage; const func: byte=$24);
@@ -435,7 +566,7 @@ begin
   msg.msgbytes[7]:=2;                                   {MsgID}
   msg.msgbytes[8]:=func;                                {YGC_Type}
   msg.msgbytes[8]:=func;                                {YGC_Command}
-  SetCRC(msg);
+  SetCRC_FE(msg);
 end;
 
 procedure CreateYGCcommandMessageLong(var msg: TMavMessage; const YGCtype: byte);
@@ -452,7 +583,69 @@ begin
   if (YGCtype=4) or (YGCtype=5) then
     for i:=11 to 16 do
       msg.msgbytes[i]:=$64;                             {100 decimal, placeholder?}
-  SetCRC(msg);
+  SetCRC_FE(msg);
+end;
+
+procedure CreateGUIheartbeat(var msg: TMAVmessage);
+begin
+  CreateStandardGUIMsg(msg, 9);
+  msg.msgbytes[10]:=2;
+  msg.msgbytes[11]:=3;
+  msg.msgbytes[12]:=4;
+  msg.msgbytes[13]:=4;                                   {Sys status ?}
+  msg.msgbytes[14]:=3;                                   {MAV Version ?}
+  SetCRC_BC(msg);
+end;
+
+procedure CreateGUIEmptyMsg(var msg: TMAVmessage; const MsgId, MsgLen: byte);
+begin
+  CreateStandardGUIMsg(msg, MsgLen);                     {Payload filled with 0x00}
+  msg.msgbytes[5]:=MsgID;
+  SetCRC_BC(msg);
+end;
+
+procedure CreateGUI_SYS_STATUS(var msg: TMAVmessage);    {From GUI with default values}
+begin
+  CreateStandardGUIMsg(msg, 31);
+  msg.msgbytes[5]:=1;
+  SetUInt16ToMsg(msg, 18, 500);                          {Load 50%}
+  SetUInt16ToMsg(msg, 20, 11000);                        {Voltage 11V}
+  SetUInt16ToMsg(msg, 22, $FFFF);                        {Current n/a}
+  msg.msgbytes[36]:=$FF;                                 {Batt cap % n/a}
+  SetCRC_BC(msg);
+end;
+
+procedure CreateGUI_PARAM_REQUEST_LIST(var msg: TMAVmessage);
+begin
+  CreateStandardGUIMsg(msg, 2);
+  msg.msgbytes[5]:=21;
+  msg.msgbytes[6]:=1;
+  SetCRC_BC(msg);
+end;
+
+procedure CreateGUI_MISSION_REQUEST_INT(var msg: TMAVmessage; const target: byte);
+begin
+  CreateStandardGUIMsg(msg, 3);
+  msg.msgbytes[5]:=51;
+  msg.msgbytes[6]:=target;
+  msg.msgbytes[8]:=1;
+  SetCRC_BC(msg);
+end;
+
+procedure CreateGUI_PARAM_SET(var msg: TMAVmessage; const parameter: shortstring; value: single);
+var
+  i: byte;
+
+begin
+  CreateStandardGUIMsg(msg, 23);
+  msg.msgbytes[5]:=23;
+  MavFloatToBytes(msg, 6, value);
+  msg.msgbytes[10]:=1;
+  msg.msgbytes[11]:=1;
+  for i:=1 to length(parameter) do
+    msg.msgbytes[i+11]:=Ord(parameter[i]);
+  msg.msgbytes[28]:=9;
+  SetCRC_BC(msg);
 end;
 
 end.

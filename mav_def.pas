@@ -55,14 +55,19 @@ const
   LengthFixPartBC=6;
   LengthFixPartFD=10;
   LengthFixPartFE=8;
-  MagicBC=$BC;
-  MagicFD=$FD;
-  MagicFE=$FE;
+  MagicBC=$BC;  {Flight controller <-> GUI, Sensor files, nested in CGO3+ messages}
+  MagicFD=$FD;  {PX4 based Yuneec drones (MAVlink V2)}
+  MagicFE=$FE;  {Flight controller <-> Gimbal <-> camera CGO3+}
   YGCsysID=10;
   MilliSecondsPerDay=86400000;
   max8=255;
   max16=65535;
   maxLenMAVmsg=280;
+
+// Parameter names
+  pGeoFence='FENCE_RADIUS';
+  pHeightLimit='FENCE_ALT_MAX';
+
 
 {The ISO 8601 standard provides an extensive set of practical well-designed
  formats for expressing date-time values as text. These formats are easy to
@@ -87,6 +92,9 @@ These include:
   rsInvalid='Invalid';
   rsUnknown='Unkown';
 
+  H480_HWflags=$00A0FC2F;
+  H480RS_HWflags=$02A0FC6F;
+
 type
   TMAVmessage = record
     msglength, msgid: uint16;
@@ -105,7 +113,7 @@ type
     lat, lon: int32;               {[degE7] WGS84, EGM96 ellipsoid}
     altMSL, alt_rel: int32;        {[mm] Altitude. Positive for up}
     eph, epv, vel, cog, hdg: uint16;
-    fix_type: byte;
+    sats_inuse, fix_type: byte;
     alt_ellipsoid: int32;          {[mm] Altitude (above WGS84, EGM96 ellipsoid)}
     h_acc, v_acc, vel_acc: uint32; {[mm] uncertainty}
     hdg_acc: uint32;               {[degE5] Heading / track uncertainty}
@@ -132,16 +140,28 @@ type
     rollspeed, pitchspeed, yawspeed: single;             {rad/s}
     vx, vy, vz, airspeed, groundspeed, climbrate: single; {m/s}
     heading, throttle: int16;                            {°, %}
+    velocity_variance, pos_horiz_variance, pos_vert_variance: single;
+    compass_variance, terrain_alt_variance: single;
+    EKFstatus: uint16;
   end;
 
 type
   THWstatusData = record
     boottime: TDateTime;
     rssi: byte;
-    Vcc, current: UInt16;                                {mV, mA}
     load, droprate, batt: UInt16;                        {% or unitless}
     baro_temp, IMU_temp: Int16;                          {cdeg}
     pressure_abs, pressure_diff: float;                  {hPa}
+    pressure_raw, baro_rawtemp: int32;
+    AccX, AccY, AccZ: int16;
+    AccCaliX, AccCaliY, AccCaliZ: single;
+    GyroX, GyroY, GyroZ: int16;
+    GyroCaliX, GyroCaliY, GyroCaliZ: single;
+    MagX, MagY, MagZ: int16;
+    MagOfsX, MagOfsY, MagOfsZ: int16;
+    MagDecl: float;
+    voltage, vccboard, current: uint16;                  {mV, mA}
+    RangeFinderDist, RangeFinderRawVoltage: single;
   end;
 
 type
@@ -150,6 +170,8 @@ type
 
   end;
 
+type
+  TFourBytes = packed array[0..3] of Byte;
 
 {Public functions and procedures}
 function CRC16X25(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1): uint16;  {for $BC}
@@ -169,7 +191,12 @@ function MavGetUInt16(const msg: TMAVmessage; pos: integer): uint16;
 function MavGetUInt32(const msg: TMAVmessage; pos: integer): uint32;
 function MavGetInt32(const msg: TMAVmessage; pos: integer): int32;
 function MavGetFloat(const msg: TMAVmessage; pos: integer): single;
-procedure Read3UInt16(const msg: TMAVmessage; pos: integer; var value1, value2, value3: uint16);
+procedure MavFloatToBytes(var msg: TMAVmessage; const pos: integer; value: single);
+procedure Read3UInt16(const msg: TMAVmessage; pos: integer; var x, y, z: uint16);
+procedure Read3Int16(const msg: TMAVmessage; pos: integer; var x, y, z: int16);
+
+function SensorTypeToStr(id: byte): string;  {Message BC}
+function MAV_PARAM_TYPEtoStr(const id: byte): string;        {Specifies the datatype of a MAVLink parameter}
 
 function MicroSecondsToDateTime(const t: uint64): TDateTime;
 function MilliSecondsToDateTime(const t: uint64): TDateTime;
@@ -200,7 +227,8 @@ function RadToDegree180(const radangle: single): single;      {rad to ° +/-180}
 function RadToDegree360(const radangle: single): single;      {rad to ° 0..360, 0 is north}
 function GimbalAngleToDegree(const angle: uint16): single;
 function GimbalPanToDegree(const angle: uint16): single;
-
+function Value3D(const x, y, z: single): single;
+function IntToHexSpace(const hex: uint64; len: byte=8; space: byte=4; separator: char=' '): string;
 
 
 implementation
@@ -305,7 +333,6 @@ procedure GPSdata_SetDefaultValues(var GPSvalues: TGPSdata);
 begin
   GPSvalues:=default(TGPSdata);                               {Set all to zero}
   with GPSvalues do begin
-    sats_visible:=max8;
     eph:=max16;
     epv:=max16;
     vel:=max16;
@@ -383,12 +410,32 @@ begin
   result:=wx;                                            {Typecast mittels absolute}
 end;
 
-procedure Read3UInt16(const msg: TMAVmessage; pos: integer; var value1, value2, value3: uint16);
+procedure MavFloatToBytes(var msg: TMAVmessage; const pos: integer; value: single);
+var
+    i: byte;
+    by: TFourBytes;
+
 begin
-  value1:=MavGetUInt16(msg, pos);
-  value2:=MavGetUInt16(msg, pos+2);
-  value3:=MavGetUInt16(msg, pos+4);
+  Move(value, by, 4);
+  for i:=0 to 3 do
+    msg.msgbytes[i+pos]:=by[i];
 end;
+
+
+procedure Read3UInt16(const msg: TMAVmessage; pos: integer; var x, y, z: uint16);
+begin
+  x:=MavGetUInt16(msg, pos);
+  y:=MavGetUInt16(msg, pos+2);
+  z:=MavGetUInt16(msg, pos+4);
+end;
+
+procedure Read3Int16(const msg: TMAVmessage; pos: integer; var x, y, z: int16);
+begin
+  x:=MavGetUInt16(msg, pos);
+  y:=MavGetUInt16(msg, pos+2);
+  z:=MavGetUInt16(msg, pos+4);
+end;
+
 
 function MicroSecondsToDateTime(const t: uint64): TDateTime;
 begin
@@ -533,26 +580,115 @@ end;
 {ENUMs see: https://github.com/mavlink/c_library_v2/blob/master/common/common.h}
 function SeverityToStr(const severity: byte): shortstring;
 begin
-  result:=IntToStr(severity);  {Default if unknown}
+  result:=IntToStr(severity);   {Default if unknown}
   case severity of
-    0: result:='EMERGENCY';    {System is unusable. This is a "panic" condition}
-    1: result:='ALERT';        {Action should be taken immediately. Indicates error
+    0: result:='EMERGENCY';     {System is unusable. This is a "panic" condition}
+    1: result:='ALERT    ';     {Action should be taken immediately. Indicates error
                                 in non-critical systems}
-    2: result:='CRITICAL';     {Action must be taken immediately. Indicates failure
+    2: result:='CRITICAL ';     {Action must be taken immediately. Indicates failure
                                 in a primary system}
-    3: result:='ERROR';        {Indicates an error in secondary/redundant systems}
-    4: result:='WARNING';      {Indicates about a possible future error if this
+    3: result:='ERROR    ';     {Indicates an error in secondary/redundant systems}
+    4: result:='WARNING  ';     {Indicates about a possible future error if this
                                 is not resolved within a given timeframe. Example
                                 would be a low battery warning}
-    5: result:='NOTICE';       {An unusual event has occurred, though not an error
+    5: result:='NOTICE   ';     {An unusual event has occurred, though not an error
                                 condition. This should be investigated for the root cause.}
-    6: result:='INFO';         {Normal operational messages. Useful for logging.
+    6: result:='INFO     ';     {Normal operational messages. Useful for logging.
                                 No action is required for these messages.}
-    7: result:='DEBUG';        {Useful non-operational messages that can assist in
+    7: result:='DEBUG    ';     {Useful non-operational messages that can assist in
                                 debugging. These should not occur during normal operation}
   end;
 end;
 
+function SensorTypeToStr(id: byte): string;  {Message BC}
+begin
+  result:=rsUnknown+IntToStr(id);
+  case id of
+    0:   result:='Heartbeat';
+    1:   result:='SYS_STATUS';
+    2:   result:='SYSTEM_TIME';
+    21:  result:='PARAM_REQUEST_LIST';       {Request all parameters of this component.
+                                              After this request, all parameters are emitted.
+                                              The parameter microservice is documented at
+                                              https://mavlink.io/en/services/parameter.html}
+    22:  result:='PARAM_VALUE';
+    23:  result:='PARAM_SET';
+    24:  result:='GPS_RAW_INT';
+    25:  result:='GPS_STATUS';
+    27:  result:='RAW_IMU';
+    29:  result:='SCALED_PRESSURE';
+    30:  result:='ATTITUDE';
+    32:  result:='LOCAL_POSITION_NED';
+    33:  result:='GLOBAL_POSITION';
+    35:  result:='RC_CHANNELS_RAW';
+    36:  result:='SERVO_OUTPUT_RAW';
+    42:  result:='MISSION_CURRENT';
+    51:  result:='MISSION_REQUEST_INT';
+    52:  result:='System_type';                    {Text: CGO3_Plus / TyphoonH}
+    56:  result:='Serial_number';
+    57:  result:='License_Cmd';
+    58:  result:='License_Ack';
+    62:  result:='NAV_CONTROLLER_OUTPUT';
+    65:  result:='RC_CHANNELS';
+    74:  result:='VRF_HUD';
+    76:  result:='COMMAND_LONG';
+    77:  result:='COMMAND_ACK';
+    150: result:='SENSOR_OFFSETS';
+    163: result:='AHRS';                           {Attitude and Heading Reference System}
+    165: result:='HW_STATUS';
+    171: result:='DATA64';
+    172: result:='DATA96';
+    173: result:='RANGEFINDER';
+    178: result:='AHRS2';
+    179: result:='CAMERA_STATUS';
+    182: result:='AHRS3';
+    183: result:='AUTOPILOT_VERSION_REQUEST';
+    193: result:='EKF_STATUS_REPORT';              {Extended Kalman Filter}
+    200: result:='GIMBAL_REPORT';
+    253: result:='STATUS_TEXT';
+  end;
+end;
+
+function MAV_PARAM_TYPEtoStr(const id: byte): string;        {Specifies the datatype of a MAVLink parameter}
+begin
+  result:='PARAM_TYPE '+intToStr(id);
+  case id of
+    1: result:='UINT8';
+    2: result:='INT8';
+    3: result:='UINT16';
+    4: result:='INT16';
+    5: result:='UINT32';
+    6: result:='INT32';
+    7: result:='UINT64';
+    8: result:='INT64';
+    9: result:='REAL32';
+    10: result:='REAL64';
+  end;
+end;
+
+{
+1   EKF_ATTITUDE=1,             Set if EKF's attitude estimate is good.
+0   EKF_VELOCITY_HORIZ=2,       Set if EKF's horizontal velocity estimate is good.
+1   EKF_VELOCITY_VERT=4,        Set if EKF's vertical velocity estimate is good.
+0   EKF_POS_HORIZ_REL=8,        Set if EKF's horizontal position (relative) estimate is good.
+
+0   EKF_POS_HORIZ_ABS=16,       Set if EKF's horizontal position (absolute) estimate is good.
+1   EKF_POS_VERT_ABS=32,        Set if EKF's vertical position (absolute) estimate is good.
+0   EKF_POS_VERT_AGL=64,        Set if EKF's vertical position (above ground) estimate is good.
+1   EKF_CONST_POS_MODE=128,     EKF is in constant position mode and does not know it's absolute or relative position.
+
+0   EKF_PRED_POS_HORIZ_REL=256, Set if EKF's predicted horizontal position (relative) estimate is good.
+0   EKF_PRED_POS_HORIZ_ABS=512, Set if EKF's predicted horizontal position (absolute) estimate is good.
+0   EKF_UNINITIALIZED=1024,     Set if EKF has never been healthy.
+0
+...
+0   EKF_GPS_GLITCHING=32768,    /* Set if EKF believes the GPS input data is faulty. | $8000
+}
+function EKFstatusToStr(const ekf: uint16; separator: char=';'): string;
+begin
+  result:='';
+// todo
+end;
 
 function FormatAcc(const acc: uint32): shortstring;           {[mm]}
 begin
@@ -592,5 +728,28 @@ begin
   result:=result*360/$1000;
 end;
 
+function Value3D(const x, y, z: single): single;
+begin
+ result:=sqrt(x*x+y*y+z*z);
+end;
+
+function IntToHexSpace(const hex: uint64; len: byte=8; space: byte=4; separator: char=' '): string;
+var
+  i: byte;
+  s: string;
+
+begin
+  s:=IntToHex(hex, len);
+    if length(s)>space then begin
+    result:=s[1];
+    for i:=2 to length(s)-1 do begin
+      result:=result+s[i];
+      if (i mod space)=0 then
+          result:=result+separator;
+    end;
+    result:=result+s[length(s)];
+  end else
+    result:=s;
+end;
 
 end.
