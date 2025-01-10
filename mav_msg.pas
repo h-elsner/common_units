@@ -140,12 +140,12 @@ procedure SetUInt16ToMsg(var msg: TMavMessage; const pos, value: uint16);
 procedure CreateStandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
 procedure CreateStandardGUIMsg(var msg: TMAVmessage; const MsgLength: byte);
 procedure SetCRC_FE(var msg: TMAVmessage);
-procedure SetCRC_BC(var msg: TMAVmessage);
 procedure CreateFCHeartBeat(var msg: TMavMessage; SequenceNumber: byte);
 procedure CreateYGCcommandMessage(var msg: TMavMessage; const func: byte=$24);
 procedure CreateYGCcommandMessageLong(var msg: TMavMessage; const YGCtype: byte);
 
 // Send GUI messages
+procedure SetCRC_BC(var msg: TMAVmessage);
 procedure CreateGUIheartbeat(var msg: TMAVmessage);
 procedure CreateGUIEmptyMsg(var msg: TMAVmessage; const MsgId, MsgLen: byte);
 procedure CreateGUI_SYS_STATUS(var msg: TMAVmessage);    {From GUI with default values}
@@ -153,6 +153,7 @@ procedure CreateGUI_PARAM_REQUEST_LIST(var msg: TMAVmessage);
 procedure CreateGUI_MISSION_REQUEST_INT(var msg: TMAVmessage; const target: byte);
 procedure CreateGUI_PARAM_SET(var msg: TMAVmessage;
                               const parameter: shortstring; value: single);
+procedure CreateGUI_COMMAND_LONG(var msg: TMAVmessage; const command: TCommandLong);
 
 implementation
 
@@ -645,6 +646,21 @@ begin
   for i:=1 to length(parameter) do
     msg.msgbytes[i+11]:=Ord(parameter[i]);
   msg.msgbytes[28]:=9;
+  SetCRC_BC(msg);
+end;
+
+procedure CreateGUI_COMMAND_LONG(var msg: TMAVmessage; const command: TCommandLong);
+var
+  i: byte;
+
+begin
+  CreateStandardGUIMsg(msg, 33);
+  msg.msgbytes[5]:=76;
+  for i:=0 to 6 do
+    MavFloatToBytes(msg, 4*i+6, command.params[i]);
+    SetUInt16ToMsg(msg, 34, command.commandID);
+    for i:=36 to 38 do
+  msg.msgbytes[i]:=1;
   SetCRC_BC(msg);
 end;
 

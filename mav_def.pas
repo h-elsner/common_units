@@ -171,6 +171,13 @@ type
   end;
 
 type
+  TCommandLong = record
+    params: array[0..6] of single;
+    commandID: uint16;
+  end;
+
+
+type
   TFourBytes = packed array[0..3] of Byte;
 
 {Public functions and procedures}
