@@ -459,7 +459,8 @@ begin
   result:='';
   FW:=FormatFloat('0.00', msg.msgbytes[pos]/100);
   FWdate:=IntToStr(MavGetUInt16(msg, pos+4))+'-'+
-          IntToStr(MavGetUInt16(msg, pos+2));
+          Format('%1.2d', [msg.msgbytes[pos+23]])+'-'+
+          Format('%1.2d', [msg.msgbytes[pos+24]]);
   for i:=pos+6 to pos+21 do
     if msg.msgbytes[i] in [32..127] then
       result:=result+chr(msg.msgbytes[i]);
