@@ -119,9 +119,12 @@ procedure SCALED_PRESSURE(const msg: TMAVmessage; pos: byte; var data: THWstatus
 procedure ATTITUDE(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 procedure LOCAL_POSITION_NED(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 procedure GLOBAL_POSITION_INT(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
+procedure RC_CHANNELS_RAW(const msg: TMAVmessage; pos: byte; var data: TChannelData);
+procedure SERVO_OUTPUT_RAW(const msg: TMAVmessage; pos: byte; var data: TChannelData);
 procedure VRF_HUD(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 procedure SENSOR_OFFSETS(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
+procedure DATA96(const msg: TMAVmessage; pos: byte; var data: TData96);
 procedure RANGEFINDER(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
 procedure EKF_STATUS_REPORT(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 
@@ -318,6 +321,29 @@ begin     {33}
   data.hdg:=MavGetUInt16(msg, pos+26);
 end;
 
+procedure RC_CHANNELS_RAW(const msg: TMAVmessage; pos: byte; var data: TChannelData);
+var
+  i: byte;
+
+begin
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
+  for i:=0 to 7 do
+    data. channel_raw[i]:=MavGetUInt16(msg, I*2+pos+4);
+  data.port:=msg.msgbytes[pos+20];
+  data.rssi:=msg.msgbytes[pos+21];
+end;
+
+procedure SERVO_OUTPUT_RAW(const msg: TMAVmessage; pos: byte; var data: TChannelData);
+var
+  i: byte;
+
+begin
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay/1000;
+  for i:=0 to 7 do
+    data.Servo_output[i]:=MavGetUInt16(msg, I*2+pos+4);
+  data.port:=msg.msgbytes[pos+20];
+end;
+
 procedure VRF_HUD(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 begin     {74}
   data.airspeed:=MavGetFloat(msg, pos);
@@ -361,14 +387,24 @@ begin     {150}
   data.AccCaliZ:=MavGetFloat(msg, pos+32);
 end;
 
+procedure DATA96(const msg: TMAVmessage; pos: byte; var data: TData96);
+var
+  i: byte;
+
+begin     {172  $AC}
+  data.value_type:=msg.msgbytes[pos];
+  for i:=0 to 23 do
+    data.value[i]:=MavGetFloat(msg, i*4+pos+2);
+end;
+
 procedure RANGEFINDER(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
-begin     {173}
+begin     {173  $AD}
   data.RangeFinderDist:=MavGetFloat(msg, pos);
   data.RangeFinderRawVoltage:=MavGetFloat(msg, pos+4);
 end;
 
 procedure EKF_STATUS_REPORT(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
-begin     {193}
+begin     {193  $C1}
   data.velocity_variance:=MavGetFloat(msg, pos);
   data.pos_horiz_variance:=MavGetFloat(msg, pos+4);
   data.pos_vert_variance:=MavGetFloat(msg, pos+8);

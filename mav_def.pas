@@ -176,6 +176,19 @@ type
     commandID: uint16;
   end;
 
+type
+  TData96 = record
+    value: array[0..23] of single;
+    value_type: byte;
+  end;
+
+type
+  TChannelData = record
+    boottime: TDateTime;
+    channel_raw: array[0..7] of uint16;
+    Servo_output: array[0..7] of uint16;
+    port, rssi: byte;
+  end;
 
 type
   TFourBytes = packed array[0..3] of Byte;
