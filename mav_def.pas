@@ -52,6 +52,10 @@ uses
 
 const
   MAVsatCount=19;                                        {20 sats means 0..19}
+  SatPRNinGPS=[1..32];
+  SatPRNinGLONASS=[65..96];
+  SatPRNinSBAS=[33..64, 120..138];
+
   LengthFixPartBC=6;
   LengthFixPartFD=10;
   LengthFixPartFE=8;
@@ -129,6 +133,8 @@ type
     sat_elevation: array[0..MAVsatCount] of byte;        {[deg] Elevation (0: right on top of receiver, 90: on the horizon) of satellite}
     sat_azimuth:   array[0..MAVsatCount] of byte;        {[deg] Direction of satellite}
     sat_snr:       array[0..MAVsatCount] of byte;        {[dB] Signal to noise ratio of satellite}
+    numGPS_visible, numGLONASS_visible, numSBAS_visible, numOther_visible: byte;
+    numGPS_used, numGLONASS_used, numSBAS_used, numOther_used: byte;
   end;
 
 type

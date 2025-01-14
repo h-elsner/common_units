@@ -249,9 +249,32 @@ begin
   data.sats_inuse:=0;
   for i:=0 to MAVsatCount do begin
     data.sat_prn[i]:=msg.msgbytes[i+pos+1];
+    if data.sat_prn[i] in SatPRNinGPS then
+      inc(data.numGPS_visible)
+    else
+      if data.sat_prn[i] in SatPRNinSBAS then
+        inc(data.numSBAS_visible)
+      else
+        if data.sat_prn[i] in SatPRNinGLONASS then
+          inc(data.numGLONASS_visible)
+        else
+          inc(data.numOther_visible);
+
     data.sat_used[i]:=msg.msgbytes[i+pos+21];
-    if data.sat_used[i]>0 then
-      data.sats_inuse:=data.sats_inuse+1;
+    if data.sat_used[i]>0 then begin
+      inc(data.sats_inuse);
+      if data.sat_prn[i] in SatPRNinGPS then
+        inc(data.numGPS_used)
+      else
+        if data.sat_prn[i] in SatPRNinSBAS then
+          inc(data.numSBAS_used)
+        else
+          if data.sat_prn[i] in SatPRNinGLONASS then
+            inc(data.numGLONASS_used)
+          else
+            inc(data.numOther_used);
+    end;
+
     data.sat_elevation[i]:=msg.msgbytes[i+pos+41];
     data.sat_azimuth[i]:=msg.msgbytes[i+pos+61];
     data.sat_snr[i]:=msg.msgbytes[i+pos+81];
