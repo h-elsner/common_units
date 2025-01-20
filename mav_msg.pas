@@ -117,12 +117,14 @@ procedure GPS_STATUS(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
 procedure RAW_IMU(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
 procedure SCALED_PRESSURE(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
 procedure ATTITUDE(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure ATTITUDE_QUATERNION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 procedure LOCAL_POSITION_NED(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 procedure GLOBAL_POSITION_INT(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
 procedure RC_CHANNELS_RAW(const msg: TMAVmessage; pos: byte; var data: TChannelData);
 procedure SERVO_OUTPUT_RAW(const msg: TMAVmessage; pos: byte; var data: TChannelData);
 procedure VRF_HUD(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
-procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure ESTIMATOR_STATUS(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure HIGHRES_IMU(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
 procedure SENSOR_OFFSETS(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
 procedure DATA96(const msg: TMAVmessage; pos: byte; var data: TData96);
 procedure RANGEFINDER(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
@@ -130,6 +132,7 @@ procedure EKF_STATUS_REPORT(const msg: TMAVmessage; pos: byte; var data: TAttitu
 
 function COMMAND_ACK(const msg: TMAVmessage; pos: byte; var CommandNumber: uint16): byte;
 function STATUSTEXT(const msg: TMAVmessage; pos: byte; SeveritySeparator: char='|'): string;
+procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 function YuneecTimeStampInSeconds(const msg: TMAVmessage): uint64;
 function GetSERIAL(const msg: TMAVmessage; pos: byte): string;
 function GetSYSTEM(const msg: TMAVmessage; pos: byte; var FW, FWdate: string): string;
@@ -178,7 +181,9 @@ begin
 
   data.load:=MavGetUInt16(msg, pos+12);
   data.voltage:=MavGetUInt16(msg, pos+14);
+  data.drop_rate:=MavGetUInt16(msg, pos+18);
 
+  data.batt_cap:=msg.msgbytes[pos+30];
 end;
 
 procedure SYS_TIME(const msg: TMAVmessage; pos: byte; var data: TGPSdata);
@@ -316,6 +321,16 @@ begin     {30}
   data.yawspeed:=MavGetFloat(msg, pos+24);
 end;
 
+procedure ATTITUDE_QUATERNION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+begin     {31}
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
+// Q1 to Q4 float not used at this time
+
+  data.rollspeed:=MavGetFloat(msg, pos+20);
+  data.pitchspeed:=MavGetFloat(msg, pos+24);
+  data.yawspeed:=MavGetFloat(msg, pos+28);
+end;
+
 procedure LOCAL_POSITION_NED(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 begin     {32}
   data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
@@ -381,14 +396,23 @@ begin     {74}
     data.heading:=msg.msgbytes[pos+16];               {Yuneec specific}
 end;
 
-procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+procedure HIGHRES_IMU(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
 begin
-  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
+  data.boottime:=MavGetUInt64(msg, pos)/MilliSecondsPerDay/1000;
+  data.XAcc:=MavGetFloat(msg, pos+8);
+  data.YAcc:=MavGetFloat(msg, pos+12);
+  data.ZAcc:=MavGetFloat(msg, pos+16);
+  data.XGyro:=MavGetFloat(msg, pos+20);
+  data.YGyro:=MavGetFloat(msg, pos+24);
+  data.ZGyro:=MavGetFloat(msg, pos+28);
+  data.XMag:=MavGetFloat(msg, pos+32);
+  data.YMag:=MavGetFloat(msg, pos+36);
+  data.ZMag:=MavGetFloat(msg, pos+40);
 
-  data.roll:=MavGetFloat(msg, pos+4);
-  data.pitch:=MavGetFloat(msg, pos+8);
-  data.yaw:=MavGetFloat(msg, pos+12);
-  data.yaw_abs:=MavGetFloat(msg, pos+16);
+  data.pressure_abs:=MavGetFloat(msg, pos+44);
+  data.pressure_diff:=MavGetFloat(msg, pos+48);
+  data.pressure_alt:=MavGetFloat(msg, pos+52);
+  data.pressure_temp:=MavGetFloat(msg, pos+56);
 end;
 
 procedure SENSOR_OFFSETS(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
@@ -442,6 +466,24 @@ begin    {77}
   result:=msg.msgbytes[pos+2];
 end;
 
+procedure ESTIMATOR_STATUS(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+begin     {230  $E6}
+  data.boottime:=MavGetUInt64(msg, pos)/MilliSecondsPerDay/1000;
+
+  data.velocity_variance:=MavGetFloat(msg, pos+8);
+  data.pos_horiz_variance:=MavGetFloat(msg, pos+12);
+  data.pos_vert_variance:=MavGetFloat(msg, pos+16);
+  data.compass_variance:=MavGetFloat(msg, pos+20);
+  data.terrain_alt_variance:=MavGetFloat(msg, pos+24);
+  data.tas_ratio:=MavGetFloat(msg, pos+28);
+  data.pos_horiz_accuracy:=MavGetFloat(msg, pos+32);
+  data.pos_vert_accuracy:=MavGetFloat(msg, pos+36);
+  if msg.msglength=41 then
+    data.EKFstatus:=msg.msgbytes[pos+40] and $FF
+  else
+    data.EKFstatus:=MavGetUint16(msg, pos+40);
+end;
+
 function STATUSTEXT(const msg: TMAVmessage; pos: byte; SeveritySeparator: char='|'): string;
 var      {253}
   i: integer;
@@ -451,6 +493,16 @@ begin
     if msg.msgbytes[pos+i] in [10, 13, 32..127] then
       result:=result+chr(msg.msgbytes[pos+i]);
   end;
+end;
+
+procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
+begin     {256}
+  data.boottime:=MavGetUInt32(msg, pos)/MilliSecondsPerDay;
+
+  data.roll:=MavGetFloat(msg, pos+4);
+  data.pitch:=MavGetFloat(msg, pos+8);
+  data.yaw:=MavGetFloat(msg, pos+12);
+  data.yaw_abs:=MavGetFloat(msg, pos+16);
 end;
 
 function YuneecTimeStampInSeconds(const msg: TMAVmessage): uint64;

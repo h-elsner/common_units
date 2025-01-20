@@ -123,7 +123,8 @@ type
     hdg_acc: uint32;               {[degE5] Heading / track uncertainty}
     yaw: uint32; {[cdeg] Yaw in earth frame from north. Use 36000 for north.}
     vx, vy, vz: int16;
-    load, voltage: uint16;
+    load, voltage, drop_rate: uint16;
+    batt_cap: byte;
     gps_present, sensors_OK: boolean;
 
 // Satellites data from GPS_status (25)
@@ -146,8 +147,9 @@ type
     rollspeed, pitchspeed, yawspeed: single;             {rad/s}
     vx, vy, vz, airspeed, groundspeed, climbrate: single; {m/s}
     heading, throttle: int16;                            {°, %}
+    pos_horiz_accuracy, pos_vert_accuracy: single;
     velocity_variance, pos_horiz_variance, pos_vert_variance: single;
-    compass_variance, terrain_alt_variance: single;
+    tas_ratio, compass_variance, terrain_alt_variance: single;
     EKFstatus: uint16;
   end;
 
@@ -157,13 +159,16 @@ type
     rssi: byte;
     load, droprate, batt: UInt16;                        {% or unitless}
     baro_temp, IMU_temp: Int16;                          {cdeg}
-    pressure_abs, pressure_diff: float;                  {hPa}
+    pressure_abs, pressure_diff, pressure_alt, pressure_temp: float;
     pressure_raw, baro_rawtemp: int32;
     AccX, AccY, AccZ: int16;
+    XAcc, YAcc, ZAcc: single;
     AccCaliX, AccCaliY, AccCaliZ: single;
     GyroX, GyroY, GyroZ: int16;
+    XGyro, YGyro, ZGyro: single;
     GyroCaliX, GyroCaliY, GyroCaliZ: single;
     MagX, MagY, MagZ: int16;
+    XMag, YMag, ZMag: single;
     MagOfsX, MagOfsY, MagOfsZ: int16;
     MagDecl: float;
     voltage, vccboard, current: uint16;                  {mV, mA}
@@ -644,6 +649,7 @@ begin
     27:  result:='RAW_IMU';
     29:  result:='SCALED_PRESSURE';
     30:  result:='ATTITUDE';
+    31:  result:='ATTITUDE_QUATERNION';
     32:  result:='LOCAL_POSITION_NED';
     33:  result:='GLOBAL_POSITION';
     35:  result:='RC_CHANNELS_RAW';
@@ -651,6 +657,7 @@ begin
     42:  result:='MISSION_CURRENT';
     51:  result:='MISSION_REQUEST_INT';
     52:  result:='System_type';                    {Text: CGO3_Plus / TyphoonH}
+    55:  result:='POSITION_TARGET_LOCAL_NED';
     56:  result:='Serial_number';
     57:  result:='License_Cmd';
     58:  result:='License_Ack';
@@ -659,6 +666,9 @@ begin
     74:  result:='VRF_HUD';
     76:  result:='COMMAND_LONG';
     77:  result:='COMMAND_ACK';
+    105: result:='HIRES_IMU';
+    111: result:='TIME_SYNC';
+    147: result:='BATTERY_STATUS';
     150: result:='SENSOR_OFFSETS';
     163: result:='AHRS';                           {Attitude and Heading Reference System}
     165: result:='HW_STATUS';
@@ -671,6 +681,9 @@ begin
     183: result:='AUTOPILOT_VERSION_REQUEST';
     193: result:='EKF_STATUS_REPORT';              {Extended Kalman Filter}
     200: result:='GIMBAL_REPORT';
+    230: result:='ESTIMATOR_STATUS';
+    241: result:='VIBRATION';
+    245: result:='EXTENDED_SYS_STATE';
     253: result:='STATUS_TEXT';
   end;
 end;
@@ -679,15 +692,15 @@ function MAV_PARAM_TYPEtoStr(const id: byte): string;        {Specifies the data
 begin
   result:='PARAM_TYPE '+intToStr(id);
   case id of
-    1: result:='UINT8';
-    2: result:='INT8';
-    3: result:='UINT16';
-    4: result:='INT16';
-    5: result:='UINT32';
-    6: result:='INT32';
-    7: result:='UINT64';
-    8: result:='INT64';
-    9: result:='REAL32';
+    1:  result:='UINT8';
+    2:  result:='INT8';
+    3:  result:='UINT16';
+    4:  result:='INT16';
+    5:  result:='UINT32';
+    6:  result:='INT32';
+    7:  result:='UINT64';
+    8:  result:='INT64';
+    9:  result:='REAL32';
     10: result:='REAL64';
   end;
 end;
@@ -733,7 +746,10 @@ end;
 
 function RadToDegree180(const radangle: single): single;      {rad to ° +/-180}
 begin
-  result:=radangle*180/pi;
+  if radangle<1000 then
+    result:=radangle*180/pi
+  else
+    result:=radangle;
 end;
 
 function RadToDegree360(const radangle: single): single;      {rad to ° 0..360, 0 is north}
