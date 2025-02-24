@@ -130,7 +130,9 @@ procedure DATA96(const msg: TMAVmessage; pos: byte; var data: TData96);
 procedure RANGEFINDER(const msg: TMAVmessage; pos: byte; var data: THWstatusData);
 procedure EKF_STATUS_REPORT(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 
+function COMMAND_LONG(const msg: TMAVmessage; pos: byte; var CommandNumber: uint16): byte;
 function COMMAND_ACK(const msg: TMAVmessage; pos: byte; var CommandNumber: uint16): byte;
+function TextOut(const msg: TMAVmessage; pos, len: uint16): string;
 function STATUSTEXT(const msg: TMAVmessage; pos: byte; SeveritySeparator: char='|'): string;
 procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
 function YuneecTimeStampInSeconds(const msg: TMAVmessage): uint64;
@@ -140,15 +142,21 @@ function GetSYSTEM(const msg: TMAVmessage; pos: byte; var FW, FWdate: string): s
 // Gimbal UART messages
 function GetGIMBAL_FW_VERSION(msg: TMAVmessage): string;
 function GetTEXT_MESSAGE(msg: TMAVmessage): string;
+procedure SetCRC(var msg: TMAVmessage; const LengthFixPart, CRC_EXTRA: byte);
 
-// Send YGC messages
+// Send YGC (CGO3+) messages
 procedure SetUInt16ToMsg(var msg: TMavMessage; const pos, value: uint16);
 procedure CreateStandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
 procedure CreateStandardGUIMsg(var msg: TMAVmessage; const MsgLength: byte);
-procedure SetCRC_FE(var msg: TMAVmessage);
-procedure CreateFCHeartBeat(var msg: TMavMessage; SequenceNumber: byte);
+procedure CreateFCHeartBeat(var msg: TMavMessage; const SequenceNumber: byte);
 procedure CreateYGCcommandMessage(var msg: TMavMessage; const func: byte=$24);
 procedure CreateYGCcommandMessageLong(var msg: TMavMessage; const YGCtype: byte);
+
+// Send YGCali (C90) messages
+procedure CreateE90StandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
+procedure CreateE90HeartBeat(var msg: TMavMessage; const SequenceNumber: byte);
+procedure CreateE90commandMessage(var msg: TMavMessage;
+                                  const SequenceNumber: byte; func: byte=$FE);
 
 // Send GUI messages
 procedure SetCRC_BC(var msg: TMAVmessage);
@@ -460,8 +468,15 @@ begin     {193  $C1}
   data.EKFstatus:=MavGetUInt16(msg, pos+20);
 end;
 
+function COMMAND_LONG(const msg: TMAVmessage; pos: byte; var CommandNumber: uint16): byte;
+begin    {76   $4C}
+  CommandNumber:=MavGetUint16(msg, pos+28);
+  {7 parameter (float)}
+  result:=msg.msgbytes[pos+31];
+end;
+
 function COMMAND_ACK(const msg: TMAVmessage; pos: byte; var CommandNumber: uint16): byte;
-begin    {77}
+begin    {77   $4D}
   CommandNumber:=MavGetUint16(msg, pos);
   result:=msg.msgbytes[pos+2];
 end;
@@ -484,15 +499,24 @@ begin     {230  $E6}
     data.EKFstatus:=MavGetUint16(msg, pos+40);
 end;
 
+function TextOut(const msg: TMAVmessage; pos, len: uint16): string;
+var
+  i: uint16;
+
+begin
+  result:='';
+  for i:=0 to len-1 do begin
+    if msg.msgbytes[pos+i] in [10, 13, 32..127] then
+      result:=result+chr(msg.msgbytes[pos+i]);
+  end;
+end;
+
 function STATUSTEXT(const msg: TMAVmessage; pos: byte; SeveritySeparator: char='|'): string;
 var      {253}
   i: integer;
 begin
-  result:=SeverityToStr(msg.msgbytes[pos])+SeveritySeparator;
-  for i:=1 to msg.msglength-1 do begin
-    if msg.msgbytes[pos+i] in [10, 13, 32..127] then
-      result:=result+chr(msg.msgbytes[pos+i]);
-  end;
+  result:=SeverityToStr(msg.msgbytes[pos])+SeveritySeparator+
+  TextOut(msg, pos+1, msg.msglength-1);
 end;
 
 procedure MOUNT_ORIENTATION(const msg: TMAVmessage; pos: byte; var data: TAttitudeData);
@@ -595,14 +619,13 @@ begin
   msg.msgbytes[4]:=1;                                    {TargetID flight controller}
 end;
 
-
-procedure SetCRC_FE(var msg: TMAVmessage);
+procedure SetCRC(var msg: TMAVmessage; const LengthFixPart, CRC_EXTRA: byte);
 var
   crc: uint16;
 
 begin
-  crc:=CRC16MAV(msg, LengthFixPartFE);
-  SetUInt16ToMsg(msg, msg.msglength+LengthFixPartFE, crc);
+  crc:=CRC16MAV(msg, LengthFixPart, CRC_EXTRA);
+  SetUInt16ToMsg(msg, msg.msglength+LengthFixPart, crc);
   msg.valid:=true;
 end;
 
@@ -616,12 +639,12 @@ begin
   msg.valid:=true;
 end;
 
-procedure CreateFCHeartBeat(var msg: TMavMessage; SequenceNumber: byte);
+procedure CreateFCHeartBeat(var msg: TMavMessage; const SequenceNumber: byte);
 begin
   CreateStandardPartMsg(msg, 5);
   msg.msgbytes[2]:=SequenceNumber;
   msg.msgbytes[12]:=1;
-  SetCRC_FE(msg);
+  SetCRC(msg, LengthFixPartFE, CRC_EXTRA_FE);
 end;
 
 { YGC_Type from gimbal
@@ -679,7 +702,7 @@ begin
   msg.msgbytes[7]:=2;                                   {MsgID}
   msg.msgbytes[8]:=func;                                {YGC_Type}
   msg.msgbytes[8]:=func;                                {YGC_Command}
-  SetCRC_FE(msg);
+  SetCRC(msg, LengthFixPartFE, CRC_EXTRA_FE);
 end;
 
 procedure CreateYGCcommandMessageLong(var msg: TMavMessage; const YGCtype: byte);
@@ -696,8 +719,40 @@ begin
   if (YGCtype=4) or (YGCtype=5) then
     for i:=11 to 16 do
       msg.msgbytes[i]:=$64;                             {100 decimal, placeholder?}
-  SetCRC_FE(msg);
+  SetCRC(msg, LengthFixPartFE, CRC_EXTRA_FE);
 end;
+
+procedure CreateE90StandardPartMsg(var msg: TMAVmessage; const MsgLength: byte);
+begin
+  ClearMAVmessage(msg);
+  msg.msgbytes[0]:=MagicFD;
+  msg.msgbytes[1]:=MsgLength;
+  msg.msglength:=MsgLength;
+  msg.msgbytes[5]:=1;                                    {SysId FC}
+  msg.sysid:=msg.msgbytes[5];
+end;
+
+procedure CreateE90commandMessage(var msg: TMavMessage;
+                                  const SequenceNumber: byte; func: byte=$FE);
+begin
+  CreateE90StandardPartMsg(msg, 50);
+  msg.msgbytes[4]:=SequenceNumber;
+  msg.msgbytes[7]:=$8A;                {MessageID=5002}
+  msg.msgbytes[8]:=$13;
+  msg.msgbytes[10]:=func;
+  SetCRC(msg, LengthFixPartFD, CRC_EXTRA_cmd);
+  msg.valid:=true;
+end;
+
+procedure CreateE90HeartBeat(var msg: TMavMessage; const SequenceNumber: byte);
+begin
+  CreateE90StandardPartMsg(msg, 9);
+  msg.msgbytes[4]:=SequenceNumber;
+  msg.msgbytes[18]:=3;
+  SetCRC(msg, LengthFixPartFD, CRC_EXTRA_heartbeat);
+  msg.valid:=true;
+end;
+
 
 procedure CreateGUIheartbeat(var msg: TMAVmessage);
 begin
