@@ -737,10 +737,9 @@ procedure CreateE90commandMessage(var msg: TMavMessage;
 begin
   CreateE90StandardPartMsg(msg, 50);
   msg.msgbytes[4]:=SequenceNumber;
-  msg.msgbytes[7]:=$8A;                {MessageID=5002}
-  msg.msgbytes[8]:=$13;
+  SetUInt16ToMsg(msg, 7, 5002);        {MsgID GimbalCali 5002}
   msg.msgbytes[10]:=func;
-  SetCRC(msg, LengthFixPartFD, CRC_EXTRA_cmd);
+  SetCRC(msg, LengthFixPartFD, CRC_EXTRA_cmd5002);
   msg.valid:=true;
 end;
 
