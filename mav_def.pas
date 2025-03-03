@@ -220,12 +220,10 @@ type
   TFourBytes = packed array[0..3] of Byte;
 
 {Public functions and procedures}
-function CRC16X25(const msg: TMAVmessage; LengthFixPart: byte): uint16;  {for $BC}
-function CheckCRC16X25(const msg: TMAVmessage; LengthFixPart: byte): boolean;
-procedure CRC_accumulate(const b: byte; var crcAccum: uint16);
-function CRC16MAV(const msg: TMAVmessage; LengthFixPart, CRC_EXTRA: byte): uint16;
-function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart, CRC_EXTRA: byte): boolean;
-
+function CRC16X25MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1;
+                     EXTRA: boolean=false; CRC_EXTRA: uint16=CRC_EXTRA_FE): uint16;
+function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1;
+                      EXTRA: boolean=false; CRC_EXTRA: uint16=CRC_EXTRA_FE): boolean;
 procedure ClearMAVmessage(var msg: TMAVmessage);
 procedure ClearAttitudeData(var data: TAttitudeData);
 procedure GPSdata_SetDefaultValues(var GPSvalues: TGPSdata);
@@ -281,14 +279,19 @@ function GetCRCextra(const msgid: integer): byte;
 
 implementation
 
-{Tabelle CCITT X25 CRC aus ST16 MavLinkPackage.java
- b ... Array of Byte
- ln... Länge Payload (Byte 1) der Message, Byte 0=$BC wird nicht genutzt
-       Schleife über Rest der Message 0...Länge Payload+Länge Fixpart-3}
+{Tabelle CCITT X25 CRC aus ST16 MavLinkPackage.java (fast CRC)
+ msg ... Array of Byte
+ ln  ... Länge Payload (Byte 1) der Message, Byte 0=$BC wird nicht genutzt
+         Schleife über Rest der Message 0...Länge Payload+Länge Fixpart-3
 
-function CRC16X25(const msg: TMAVmessage; LengthFixPart: byte): uint16;
+ BC:   EXTRA=false
+ FE:   EXTRA=true
+ FD:   EXTRA=true, CRC_EXTRA
+
+ pos for all = 1 except embedded BC messages}
+procedure CRC_accumulate(const b: byte; var crcAccum: uint16);
 const
-  CRC16Tab: array[0..255] of Word = (
+  Crc16Tab: array[0..255] of Word = (
     $0000, $1189, $2312, $329B, $4624, $57AD, $6536, $74BF,
     $8C48, $9DC1, $AF5A, $BED3, $CA6C, $DBE5, $E97E, $F8F7,
     $1081, $0108, $3393, $221A, $56A5, $472C, $75B7, $643E,
@@ -322,48 +325,28 @@ const
     $F78F, $E606, $D49D, $C514, $B1AB, $A022, $92B9, $8330,
     $7BC7, $6A4E, $58D5, $495C, $3DE3, $2C6A, $1EF1, $0F78);
 
-var
-  i: integer;
+begin
+  crcAccum:=((crcAccum shr 8) and $00FF) xor CRC16Tab[(b xor crcAccum) and $00FF];
+end;
+
+function CRC16X25MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1;
+                     EXTRA: boolean=false; CRC_EXTRA: uint16=CRC_EXTRA_FE): uint16;
+var i: integer;
 
 begin
   result:=$FFFF;                             {CRC Initializing}
-  for i:=1 to LengthFixPart+msg.msglength-1 do begin
-    result:=((result shr 8) and $00FF) xor
-            CRC16Tab[((msg.msgbytes[i]) xor result) and $00FF];
-  end;
-end;
-
-function CheckCRC16X25(const msg: TMAVmessage; LengthFixPart: byte): boolean;
-begin
-  result:=CRC16X25(msg, LengthFixPart+2)=0;
-end;  {result should be zero over all bytes except Record ID including CRC}
-
-{Translated from checksum.h of MavlinkLib-master}
-procedure CRC_accumulate(const b: byte; var crcAccum: uint16);
-var
-  tmp: uint8;
-
-begin
-  tmp:=b xor (crcAccum and $00FF);
-  tmp:=tmp xor (tmp shl 4);
-  crcAccum:=(crcAccum shr 8) xor (tmp shl 8) xor (tmp shl 3) xor (tmp shr 4);
-end;
-
-function CRC16MAV(const msg: TMAVmessage; LengthFixPart, CRC_EXTRA: byte): uint16;
-var
-  i: integer;
-
-begin
-  result:=$FFFF;
-  for i:=1 to LengthFixPart+msg.msglength-1 do begin
+  for i:=startpos to LengthFixPart+msg.msglength-1 do begin
     CRC_accumulate(msg.msgbytes[i], result);
   end;
-  CRC_accumulate(CRC_EXTRA, result);
+  if EXTRA then
+    CRC_accumulate(CRC_EXTRA, result);
 end;
 
-function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart, CRC_EXTRA: byte): boolean;
+function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1;
+                      EXTRA: boolean=false; CRC_EXTRA: uint16=CRC_EXTRA_FE): boolean;
 begin
-  result:=(CRC16MAV(msg, LengthFixPart, CRC_EXTRA)=MavGetUInt16(msg, LengthFixPart+msg.msglength));
+  result:=(CRC16X25MAV(msg, LengthFixPart, startpos,
+           EXTRA, CRC_EXTRA)=MavGetUInt16(msg, LengthFixPart+msg.msglength));
 end;
 
 procedure ClearMAVmessage(var msg: TMAVmessage);

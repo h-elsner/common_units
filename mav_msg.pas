@@ -142,7 +142,7 @@ function GetSYSTEM(const msg: TMAVmessage; pos: byte; var FW, FWdate: string): s
 // Gimbal UART messages
 function GetGIMBAL_FW_VERSION(msg: TMAVmessage): string;
 function GetTEXT_MESSAGE(msg: TMAVmessage): string;
-procedure SetCRC(var msg: TMAVmessage; const LengthFixPart, CRC_EXTRA: byte);
+procedure SetCRC(var msg: TMAVmessage; const LengthFixPart: byte; CRC_EXTRA: byte=CRC_EXTRA_FE);
 
 // Send YGC (CGO3+) messages
 procedure SetUInt16ToMsg(var msg: TMavMessage; const pos, value: uint16);
@@ -512,8 +512,6 @@ begin
 end;
 
 function STATUSTEXT(const msg: TMAVmessage; pos: byte; SeveritySeparator: char='|'): string;
-var      {253}
-  i: integer;
 begin
   result:=SeverityToStr(msg.msgbytes[pos])+SeveritySeparator+
   TextOut(msg, pos+1, msg.msglength-1);
@@ -619,12 +617,12 @@ begin
   msg.msgbytes[4]:=1;                                    {TargetID flight controller}
 end;
 
-procedure SetCRC(var msg: TMAVmessage; const LengthFixPart, CRC_EXTRA: byte);
+procedure SetCRC(var msg: TMAVmessage; const LengthFixPart: byte; CRC_EXTRA: byte=CRC_EXTRA_FE);
 var
   crc: uint16;
 
 begin
-  crc:=CRC16MAV(msg, LengthFixPart, CRC_EXTRA);
+  crc:=CRC16X25MAV(msg, LengthFixPart, 1, true, CRC_EXTRA);
   SetUInt16ToMsg(msg, msg.msglength+LengthFixPart, crc);
   msg.valid:=true;
 end;
@@ -634,7 +632,7 @@ var
   crc: uint16;
 
 begin
-  crc:=CRC16X25(msg, LengthFixPartBC);
+  crc:=CRC16X25MAV(msg, LengthFixPartBC);
   SetUInt16ToMsg(msg, msg.msglength+LengthFixPartBC, crc);
   msg.valid:=true;
 end;
