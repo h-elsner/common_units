@@ -63,11 +63,6 @@ const
   MagicFD=$FD;  {PX4 based Yuneec drones (MAVlink V2)}
   MagicFE=$FE;  {Flight controller <-> Gimbal <-> camera CGO3+}
   
-  CRC_EXTRA_FE=0;
-  CRC_EXTRA_heartbeat=50;
-  CRC_EXTRA_cmd5000=252;
-  CRC_EXTRA_cmd5002=224;
-
   YGCsysID=10;
   MilliSecondsPerDay=86400000;
   max8=255;
@@ -110,8 +105,13 @@ type
   TCRC_EXTRA_array=array [0..1] of array of UINT32;
 
 const                         {MAVLINK_MSG_ID_xxx_CRC}
+  CRC_EXTRA_FE=0;
+  CRC_EXTRA_heartbeat=50;
+  CRC_EXTRA_cmd5000=252;
+  CRC_EXTRA_cmd5002=224;
+
   CRCextra: TCRC_EXTRA_array=(( 0,  1,  2,  4, 20, 21, 22, 23,24,25, 26, 27,28, 29,30, 31, 32, 33, 34, 35, 36,46,50, 62, 65, 69, 70,74, 76, 77, 85, 87,105,111,124,139,140,141,147,148,230,241,245,253,264,265,283,284,285,4007,5000,5002),
-                              (50,124,137,237,214,159,220,168,24,23,170,144,67,115,39,246,185,104,237,244,222,11,78,183,118,243,124,20,152,143,140,150, 93, 34, 87,168,181, 47,154,178,163, 90,130, 83, 49, 26, 74, 99,137,  22, 252,CRC_EXTRA_cmd5002));
+                              (50,124,137,237,214,159,220,168,24,23,170,144,67,115,39,246,185,104,237,244,222,11,78,183,118,243,124,20,152,143,140,150, 93, 34, 87,168,181, 47,154,178,163, 90,130, 83, 49, 26, 74, 99,137,  22,CRC_EXTRA_cmd5000,CRC_EXTRA_cmd5002));
 
 type
   TMAVmessage = record
@@ -342,6 +342,7 @@ begin
     CRC_accumulate(CRC_EXTRA, result);
 end;
 
+{Fast CRC with or without CRC_EXTRA}
 function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1;
                       EXTRA: boolean=false; CRC_EXTRA: uint16=CRC_EXTRA_FE): boolean;
 begin

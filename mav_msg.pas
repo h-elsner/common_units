@@ -496,7 +496,7 @@ begin
   result:=IntToHex(i, 8)+'-';
   i:=MavGetUInt32(msg, pos+4);
   result:=result+IntToHex(i, 8)+'-';
-  i:=MavGetUInt32(msg, pos+4);
+  i:=MavGetUInt32(msg, pos+8);
   result:=result+IntToHex(i, 8);
 end;
 
