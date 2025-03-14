@@ -62,7 +62,16 @@ const
   MagicBC=$BC;  {Flight controller <-> GUI, Sensor files, nested in CGO3+ messages}
   MagicFD=$FD;  {PX4 based Yuneec drones (MAVlink V2)}
   MagicFE=$FE;  {Flight controller <-> Gimbal <-> camera CGO3+}
-  
+
+  CGO3start1=$88;
+  CGO3start2=$77;
+  CGO3endID=$99;
+  GB203msgLen=35;
+
+  defaultbaudGB203=230400;
+  defaultbaudE90=  500000;
+  defaultbaudCGO3= 115200;
+
   YGCsysID=10;
   MilliSecondsPerDay=86400000;
   max8=255;
@@ -224,20 +233,21 @@ function CRC16X25MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte
                      EXTRA: boolean=false; CRC_EXTRA: uint16=CRC_EXTRA_FE): uint16;
 function CheckCRC16MAV(const msg: TMAVmessage; LengthFixPart: byte; startpos: byte=1;
                       EXTRA: boolean=false; CRC_EXTRA: uint16=CRC_EXTRA_FE): boolean;
+function GB203CRC8(const data: TMAVmessage; startpos: byte=0): byte;    {Create CRC8 checksum}
 procedure ClearMAVmessage(var msg: TMAVmessage);
 procedure ClearAttitudeData(var data: TAttitudeData);
 procedure GPSdata_SetDefaultValues(var GPSvalues: TGPSdata);
 
-function MavGetUInt64(const msg: TMAVmessage; pos: integer): uint64;
-function MAVGetUINT64Reverse(const msg: TMAVmessage; pos: integer): uint64;  {Big endian}
-function MavGetInt16(const msg: TMAVmessage; pos: integer): int16;
-function MavGetUInt16(const msg: TMAVmessage; pos: integer): uint16;
-function MavGetUInt32(const msg: TMAVmessage; pos: integer): uint32;
-function MavGetInt32(const msg: TMAVmessage; pos: integer): int32;
-function MavGetFloat(const msg: TMAVmessage; pos: integer): single;
-procedure MavFloatToBytes(var msg: TMAVmessage; const pos: integer; value: single);
-procedure Read3UInt16(const msg: TMAVmessage; pos: integer; var x, y, z: uint16);
-procedure Read3Int16(const msg: TMAVmessage; pos: integer; var x, y, z: int16);
+function MavGetUInt64(const msg: TMAVmessage; index: integer): uint64;
+function MAVGetUINT64Reverse(const msg: TMAVmessage; index: integer): uint64;  {Big endian}
+function MavGetInt16(const msg: TMAVmessage; index: integer): int16;
+function MavGetUInt16(const msg: TMAVmessage; index: integer): uint16;
+function MavGetUInt32(const msg: TMAVmessage; index: integer): uint32;
+function MavGetInt32(const msg: TMAVmessage; index: integer): int32;
+function MavGetFloat(const msg: TMAVmessage; index: integer): single;
+procedure MavFloatToBytes(var msg: TMAVmessage; const index: integer; value: single);
+procedure Read3UInt16(const msg: TMAVmessage; index: integer; var x, y, z: uint16);
+procedure Read3Int16(const msg: TMAVmessage; index: integer; var x, y, z: int16);
 
 function SensorTypeToStr(id: byte): string;  {Message BC}
 function MsgIDtoStr(id: integer): string;
@@ -288,7 +298,7 @@ implementation
  FE:   EXTRA=true
  FD:   EXTRA=true, CRC_EXTRA
 
- pos for all = 1 except embedded BC messages}
+ index for all = 1 except embedded BC messages}
 procedure CRC_accumulate(const b: byte; var crcAccum: uint16);
 const
   Crc16Tab: array[0..255] of Word = (
@@ -350,6 +360,18 @@ begin
            EXTRA, CRC_EXTRA)=MavGetUInt16(msg, LengthFixPart+msg.msglength));
 end;
 
+function GB203CRC8(const data: TMAVmessage; startpos: byte=0): byte;    {Create CRC8 checksum}
+var
+  i: byte;
+
+begin
+  result:=0;
+  for i:=2 to GB203msgLen-3 do begin
+    result:=result+data.msgbytes[i+startpos];
+  end;
+  result:=result and $FF;
+end;
+
 procedure ClearMAVmessage(var msg: TMAVmessage);
 begin
   msg:=default(TMAVmessage);
@@ -363,7 +385,7 @@ end;
 
 procedure GPSdata_SetDefaultValues(var GPSvalues: TGPSdata);
 begin
-  GPSvalues:=default(TGPSdata);                               {Set all to zero}
+  GPSvalues:=default(TGPSdata);                          {Set all to zero}
   with GPSvalues do begin
     eph:=max16;
     epv:=max16;
@@ -376,61 +398,61 @@ begin
   end;
 end;
 
-function MavGetUInt64(const msg: TMAVmessage; pos: integer): uint64;
+function MavGetUInt64(const msg: TMAVmessage; index: integer): uint64;
 var
   i: integer;
 
 begin
   result:=0;
   for i:=0 to 7 do begin
-    result:=result+msg.msgbytes[pos+i]*(256**i);
+    result:=result+msg.msgbytes[index+i]*(256**i);
   end;
 end;
 
-function MAVGetUINT64Reverse(const msg: TMAVmessage; pos: integer): uint64;
+function MAVGetUINT64Reverse(const msg: TMAVmessage; index: integer): uint64;
 var
   i: integer;
 
 begin
   result:=0;
   for i:=0 to 7 do begin
-    result:=result+msg.msgbytes[pos+i]*(256**(7-i));
+    result:=result+msg.msgbytes[index+i]*(256**(7-i));
   end;
 end;
 
-function MavGetInt16(const msg: TMAVmessage; pos: integer): int16;
+function MavGetInt16(const msg: TMAVmessage; index: integer): int16;
 begin
-  result:=msg.msgbytes[pos]+msg.msgbytes[pos+1]*256;
+  result:=msg.msgbytes[index]+msg.msgbytes[index+1]*256;
 end;
 
-function MavGetUInt16(const msg: TMAVmessage; pos: integer): uint16;
+function MavGetUInt16(const msg: TMAVmessage; index: integer): uint16;
 begin
-  result:=msg.msgbytes[pos]+msg.msgbytes[pos+1]*256;
+  result:=msg.msgbytes[index]+msg.msgbytes[index+1]*256;
 end;
 
-function MavGetUInt32(const msg: TMAVmessage; pos: integer): uint32;
+function MavGetUInt32(const msg: TMAVmessage; index: integer): uint32;
 var
   i: integer;
 
 begin
   result:=0;
   for i:=0 to 3 do begin
-    result:=result+msg.msgbytes[pos+i]*(256**i);
+    result:=result+msg.msgbytes[index+i]*(256**i);
   end;
 end;
 
-function MavGetInt32(const msg: TMAVmessage; pos: integer): int32;
+function MavGetInt32(const msg: TMAVmessage; index: integer): int32;
 var
   i: integer;
 
 begin
   result:=0;
   for i:=0 to 3 do begin
-    result:=result+msg.msgbytes[pos+i]*(256**i);
+    result:=result+msg.msgbytes[index+i]*(256**i);
   end;
 end;
 
-function MavGetFloat(const msg: TMAVmessage; pos: integer): single;
+function MavGetFloat(const msg: TMAVmessage; index: integer): single;
 var i: integer;
     wfl: packed array[0..3] of Byte;
     wx: Single absolute wfl;
@@ -438,11 +460,11 @@ var i: integer;
 begin
   result:=0;
   for i:=0 to 3 do                                       {Endianess prüfen (to/downto)}
-    wfl[i]:=msg.msgbytes[i+pos];                         {4 byte aus Buffer ausschneiden}
+    wfl[i]:=msg.msgbytes[i+index];                       {4 byte aus Buffer ausschneiden}
   result:=wx;                                            {Typecast mittels absolute}
 end;
 
-procedure MavFloatToBytes(var msg: TMAVmessage; const pos: integer; value: single);
+procedure MavFloatToBytes(var msg: TMAVmessage; const index: integer; value: single);
 var
     i: byte;
     by: TFourBytes;
@@ -450,22 +472,22 @@ var
 begin
   Move(value, by, 4);
   for i:=0 to 3 do
-    msg.msgbytes[i+pos]:=by[i];
+    msg.msgbytes[i+index]:=by[i];
 end;
 
 
-procedure Read3UInt16(const msg: TMAVmessage; pos: integer; var x, y, z: uint16);
+procedure Read3UInt16(const msg: TMAVmessage; index: integer; var x, y, z: uint16);
 begin
-  x:=MavGetUInt16(msg, pos);
-  y:=MavGetUInt16(msg, pos+2);
-  z:=MavGetUInt16(msg, pos+4);
+  x:=MavGetUInt16(msg, index);
+  y:=MavGetUInt16(msg, index+2);
+  z:=MavGetUInt16(msg, index+4);
 end;
 
-procedure Read3Int16(const msg: TMAVmessage; pos: integer; var x, y, z: int16);
+procedure Read3Int16(const msg: TMAVmessage; index: integer; var x, y, z: int16);
 begin
-  x:=MavGetUInt16(msg, pos);
-  y:=MavGetUInt16(msg, pos+2);
-  z:=MavGetUInt16(msg, pos+4);
+  x:=MavGetUInt16(msg, index);
+  y:=MavGetUInt16(msg, index+2);
+  z:=MavGetUInt16(msg, index+4);
 end;
 
 
@@ -545,14 +567,14 @@ begin
   result:='';
   case fixtype of
     0:	Result:='No GPS connected';
-    1:	Result:='No position information, GPS is connected';
-    2:	Result:='2D position';
-    3:	Result:='3D position';
-    4:	Result:='DGPS/SBAS aided 3D position';
-    5:	Result:='RTK float, 3D position';
-    6:	Result:='RTK fixed, 3D position';
+    1:	Result:='No indexition information, GPS is connected';
+    2:	Result:='2D indexition';
+    3:	Result:='3D indexition';
+    4:	Result:='DGPS/SBAS aided 3D indexition';
+    5:	Result:='RTK float, 3D indexition';
+    6:	Result:='RTK fixed, 3D indexition';
     7:	Result:='Static fixed, typically used for base stations';
-    8:	Result:='PPP, 3D position';
+    8:	Result:='PPP, 3D indexition';
   end;
 end;
 
@@ -620,7 +642,7 @@ begin
     2: result:='CRITICAL ';     {Action must be taken immediately. Indicates failure
                                 in a primary system}
     3: result:='ERROR    ';     {Indicates an error in secondary/redundant systems}
-    4: result:='WARNING  ';     {Indicates about a possible future error if this
+    4: result:='WARNING  ';     {Indicates about a indexsible future error if this
                                 is not resolved within a given timeframe. Example
                                 would be a low battery warning}
     5: result:='NOTICE   ';     {An unusual event has occurred, though not an error
