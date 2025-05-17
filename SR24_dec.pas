@@ -44,6 +44,7 @@ byte idx val   desrcription
                          Telemetry to RC    = 2                len $26  38
 	                 TRANSMITTERGPSDATA = 3                len $2B  43
                          BIND               = 4                len 8
+                         ST24 Telemetry     = 5                len $26  38
                          Addition data      = 20               len minimal 7
  4       Counter         0 for old SR24 FW (Q500)
  5       ??    Random?   0 for old SR24 FW (Q500)
@@ -89,7 +90,7 @@ const
   header1=$55;                                          {Message start ID}
   header2=$55;
   maxlen=67;                                            {according ST24.h define ST24_DATA_LEN_MAX 64}
-  ValidMsgTypes=[0..4, 20];
+  ValidMsgTypes=[0..5, 20];
   BindMessage: array [0..10] of byte =
                (header1, header2, 8, 4, 0, 0, $42, $49, $4E, $44, $B0);
                {                len type       B    I    N    D   CRC}
@@ -292,6 +293,7 @@ begin
     2:  result:='Telemetry_2.4GHz';
     3:  result:='C-GPS_2.4GHz';
     4:  result:='Bind mode';
+    5:  result:='Telemetry H920';
     20: result:='AdditionalData';
   end;
 end;
