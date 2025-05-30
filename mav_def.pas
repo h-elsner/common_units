@@ -285,6 +285,7 @@ function GimbalPanToDegree(const angle: uint16): single;
 function Value3D(const x, y, z: single): single;
 function IntToHexSpace(const hex: uint64; len: byte=8; space: byte=4; separator: char=' '): string;
 function GetCRCextra(const msgid: integer): byte;
+function UpscaleTo150(const v: integer; upscale: boolean=true): uint16;
 
 
 implementation
@@ -567,14 +568,14 @@ begin
   result:='';
   case fixtype of
     0:	Result:='No GPS connected';
-    1:	Result:='No indexition information, GPS is connected';
-    2:	Result:='2D indexition';
-    3:	Result:='3D indexition';
-    4:	Result:='DGPS/SBAS aided 3D indexition';
-    5:	Result:='RTK float, 3D indexition';
-    6:	Result:='RTK fixed, 3D indexition';
+    1:	Result:='No position information, GPS is connected';
+    2:	Result:='2D position';
+    3:	Result:='3D position';
+    4:	Result:='DGPS/SBAS aided 3D position';
+    5:	Result:='RTK float, 3D position';
+    6:	Result:='RTK fixed, 3D position';
     7:	Result:='Static fixed, typically used for base stations';
-    8:	Result:='PPP, 3D indexition';
+    8:	Result:='PPP, 3D position';
   end;
 end;
 
@@ -1097,6 +1098,22 @@ begin
       exit(CRCextra[1, i]);
     end;
   end;
+end;
+
+{Upscale channel value from 693.. 3412 to 0..4095 (100% to 150%)}
+function UpscaleTo150(const v: integer; upscale: boolean=true): uint16;
+var
+  conv: double;
+
+begin
+  if upscale then begin
+    conv:=v-683;
+    if conv<0 then
+      conv:=0;
+    conv:=conv * 4095.0 / 2729.0;
+    result:=round(conv) and $FFF;
+  end else
+    result:=v and $FFF;
 end;
 
 end.

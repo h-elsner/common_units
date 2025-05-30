@@ -170,7 +170,7 @@ var      {22}
 begin
   result:='';
   for i:=index+8 to index+21 do
-    if msg.msgbytes[i] in [32..127] then
+    if msg.msgbytes[i] in [32..126] then
       result:=result+chr(msg.msgbytes[i]);
   value:=MavGetFloat(msg, index);
 end;
@@ -457,7 +457,7 @@ var
 begin
   result:='';
   for i:=0 to len-1 do begin
-    if msg.msgbytes[index+i] in [10, 13, 32..127] then
+    if msg.msgbytes[index+i] in [10, 13, 32..126] then
       result:=result+chr(msg.msgbytes[index+i]);
   end;
 end;
@@ -510,7 +510,7 @@ begin
           Format('%1.2d', [msg.msgbytes[index+23]])+'-'+
           Format('%1.2d', [msg.msgbytes[index+24]]);
   for i:=index+6 to index+21 do
-    if msg.msgbytes[i] in [32..127] then
+    if msg.msgbytes[i] in [32..126] then
       result:=result+chr(msg.msgbytes[i]);
 end;
 
@@ -564,7 +564,7 @@ begin
   msg.msgbytes[1]:=MsgLength;
   msg.msglength:=MsgLength;
   msg.msgbytes[2]:=1;                                    {SequNo}
-  msg.msgbytes[3]:=200;                                  {SysId GUI}
+  msg.msgbytes[3]:=200;                                  {SysId GUI=$C8}
   msg.msgbytes[4]:=1;                                    {TargetID flight controller}
 end;
 
