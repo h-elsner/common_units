@@ -78,6 +78,10 @@ const
   max16=65535;
   maxLenMAVmsg=280;
 
+  channel_min=683;
+  channel_neutral=2048;
+  channel_max=3412;
+
 // Parameter names
   pGeoFence='FENCE_RADIUS';
   pHeightLimit='FENCE_ALT_MAX';
@@ -290,16 +294,17 @@ function UpscaleTo150(const v: integer; upscale: boolean=true): uint16;
 
 implementation
 
-{Tabelle CCITT X25 CRC aus ST16 MavLinkPackage.java (fast CRC)
+{Table CCITT X25 CRC aus ST16 MavLinkPackage.java (fast CRC)
  msg ... Array of Byte
- ln  ... Länge Payload (Byte 1) der Message, Byte 0=$BC wird nicht genutzt
-         Schleife über Rest der Message 0...Länge Payload+Länge Fixpart-3
+ ln  ... Length Payload (is Byte 1) in message, Magic byte0 = 0xBC excluded
+         Loop for the other messages bytes 1...Length Payload + Length Fixpart-1
 
  BC:   EXTRA=false
- FE:   EXTRA=true
+ FE:   EXTRA=true, CRC_EXTRA = 0
  FD:   EXTRA=true, CRC_EXTRA
 
  index for all = 1 except embedded BC messages}
+
 procedure CRC_accumulate(const b: byte; var crcAccum: uint16);
 const
   Crc16Tab: array[0..255] of Word = (
@@ -1107,7 +1112,7 @@ var
 
 begin
   if upscale then begin
-    conv:=v-683;
+    conv:=v-channel_min;
     if conv<0 then
       conv:=0;
     conv:=conv * 4095.0 / 2729.0;
